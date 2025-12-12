@@ -27,6 +27,10 @@ export function useConverter({
   const [status, setStatus] = useState<ConvertStatus>("idle");
   const [progress, setProgress] = useState(0);
   const [errorMessage, setErrorMessage] = useState("");
+  const [resultBlob, setResultBlob] = useState<Blob | null>(null);
+  const [resultFileName, setResultFileName] = useState<string | null>(null);
+  const [conversionMode, setConversionMode] = useState<string | null>(null);
+  const [pdfHasText, setPdfHasText] = useState<boolean | null>(null);
   const [dragActive, setDragActive] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -41,7 +45,28 @@ export function useConverter({
     setStatus("idle");
     setErrorMessage("");
     setProgress(0);
+    setResultBlob(null);
+    setResultFileName(null);
+    setConversionMode(null);
+    setPdfHasText(null);
   }, []);
+
+  const triggerDownload = useCallback((blob: Blob, name: string) => {
+    const downloadUrl = window.URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = downloadUrl;
+    link.download = name;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    // Give the browser a tick to start the download before revoking.
+    setTimeout(() => window.URL.revokeObjectURL(downloadUrl), 1000);
+  }, []);
+
+  const downloadResult = useCallback(() => {
+    if (!resultBlob || !resultFileName) return;
+    triggerDownload(resultBlob, resultFileName);
+  }, [resultBlob, resultFileName, triggerDownload]);
 
   const validateAndSetFile = useCallback(
     (selectedFile: File) => {
@@ -159,14 +184,17 @@ export function useConverter({
           setStatus("success");
 
           const blob = this.response as Blob;
-          const downloadUrl = window.URL.createObjectURL(blob);
-          const link = document.createElement("a");
-          link.href = downloadUrl;
-          link.download = file.name.replace(/\.[^/.]+$/, "") + config.outputExt;
-          document.body.appendChild(link);
-          link.click();
-          link.remove();
-          window.URL.revokeObjectURL(downloadUrl);
+          const outName = file.name.replace(/\.[^/.]+$/, "") + config.outputExt;
+          setResultBlob(blob);
+          setResultFileName(outName);
+
+          const modeHeader = xhr.getResponseHeader("X-Conversion-Mode");
+          setConversionMode(modeHeader);
+          const hasTextHeader = xhr.getResponseHeader("X-PDF-Has-Text");
+          if (hasTextHeader === "1") setPdfHasText(true);
+          else if (hasTextHeader === "0") setPdfHasText(false);
+
+          triggerDownload(blob, outName);
         } else {
           setStatus("error");
           setErrorMessage(`Lỗi Server: ${this.statusText}`);
@@ -184,13 +212,17 @@ export function useConverter({
       setStatus("error");
       setErrorMessage("Đã xảy ra lỗi không mong muốn.");
     }
-  }, [activeTool, apiUrl, config.outputExt, file, isDemoMode, simulateConversion]);
+  }, [activeTool, apiUrl, config.outputExt, file, isDemoMode, simulateConversion, triggerDownload]);
 
   return {
     file,
     status,
     progress,
     errorMessage,
+    resultBlob,
+    resultFileName,
+    conversionMode,
+    pdfHasText,
     dragActive,
     fileInputRef,
     dropzoneRef,
@@ -204,5 +236,6 @@ export function useConverter({
     handleDrop,
     handleChange,
     handleConvert,
+    downloadResult,
   };
 }

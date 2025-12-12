@@ -248,6 +248,22 @@ export default function HomeConverter({ activeTool, onSelectTool }: Props) {
                   File {currentConfig.outputExt} đã sẵn sàng.
                 </p>
 
+                {converter.conversionMode && (
+                  <div className="mb-6 text-sm text-slate-600">
+                    Chế độ chuyển đổi: <span className="font-semibold">{converter.conversionMode}</span>
+                    {converter.conversionMode === "tier-b" && (
+                      <div className="mt-1 text-xs text-slate-500">
+                        DOCX dạng ảnh để giữ giống bản gốc, nên sẽ khó chỉnh sửa nội dung.
+                      </div>
+                    )}
+                    {converter.pdfHasText === false && (
+                      <div className="mt-1 text-xs text-slate-500">
+                        PDF này có vẻ là scan/ảnh (không có text layer). Muốn Word chỉnh sửa được cần OCR trước khi chuyển đổi.
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 <div className="bg-gradient-to-br from-indigo-50 to-purple-50 border border-indigo-100 rounded-2xl p-5 mb-6 text-left">
                   <div className="flex items-center gap-2 mb-3">
                     <Sparkles className="text-indigo-600" size={18} />
@@ -306,7 +322,12 @@ export default function HomeConverter({ activeTool, onSelectTool }: Props) {
                 <div className="flex flex-col gap-3">
                   <button
                     onClick={() => {
-                      // In demo mode we don't have a blob, so just reset.
+                      if (converter.resultBlob && converter.resultFileName) {
+                        converter.downloadResult();
+                        return;
+                      }
+
+                      // Demo mode / no result blob available.
                       converter.removeFile();
                     }}
                     className="w-full py-3.5 bg-blue-600 text-white font-semibold rounded-xl hover:bg-blue-700 shadow-lg shadow-blue-200 transition-all flex items-center justify-center gap-2"
