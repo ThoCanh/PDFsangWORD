@@ -1,20 +1,36 @@
-# Node / Next
-node_modules/
-.next/
-out/
-dist/
+# Root ignore rules
 
-# Python
-__pycache__/
-*.pyc
-.venv/
-venv/
-.env
-
-# OS / editors
+# OS / IDE
 .DS_Store
 Thumbs.db
 .vscode/
 
+# Python
+__pycache__/
+*.py[cod]
+*.pyd
+*.pyo
+*.pwc
+*.pkl
+
+# Env/secrets
+.env
+.env.*
+**/.env
+**/.env.*
+
+# Node / Next
+node_modules/
+.next/
+out/
+coverage/
+*.tsbuildinfo
+
 # Logs
-*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# Vercel
+.vercel/
