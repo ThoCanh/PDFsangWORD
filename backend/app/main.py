@@ -1,8 +1,14 @@
+from datetime import datetime, timezone
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .api.router import api_router
 from .core.config import settings
+from .db.base import Base
+from .db.session import engine
+from .db import models as _models  # noqa: F401
+from .core.log_buffer import install_log_buffer
 
 # CHÚ Ý: Biến này BẮT BUỘC phải tên là 'app' (vì lệnh chạy là :app)
 app = FastAPI(title=settings.app_name)
@@ -18,6 +24,13 @@ if origins:
     )
 
 app.include_router(api_router)
+
+
+@app.on_event("startup")
+def _init_db() -> None:
+    install_log_buffer()
+    app.state.started_at = datetime.now(timezone.utc)
+    Base.metadata.create_all(bind=engine)
 
 
 @app.get("/")

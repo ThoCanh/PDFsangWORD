@@ -2,8 +2,34 @@
 
 import React from "react";
 import { Search } from "lucide-react";
-import { EXTENDED_LOGS } from "../_data/mock";
 import { LogLevelBadge } from "../_ui/Badges";
+import { BACKEND_URL } from "../../../_config/app";
+
+type ApiLogItem = {
+  id: number;
+  time: string;
+  level: string;
+  logger: string;
+  message: string;
+};
+
+type LogRow = {
+  id: number;
+  time: string;
+  level: "INFO" | "SUCCESS" | "WARN" | "ERROR";
+  service: string;
+  message: string;
+  user: string;
+};
+
+type SystemStatus = {
+  app_name: string;
+  server_time: string;
+  started_at: string | null;
+  users_count: number;
+  db_ok: boolean;
+  conversion: any;
+};
 
 export default function SystemLogsView() {
   const [search, setSearch] = React.useState("");
@@ -11,16 +37,91 @@ export default function SystemLogsView() {
     "ALL" | "INFO" | "SUCCESS" | "WARN" | "ERROR"
   >("ALL");
 
+  const [loading, setLoading] = React.useState(true);
+  const [error, setError] = React.useState<string | null>(null);
+  const [status, setStatus] = React.useState<SystemStatus | null>(null);
+  const [logs, setLogs] = React.useState<LogRow[]>([]);
+
+  React.useEffect(() => {
+    let cancelled = false;
+
+    function mapLevel(lv: string): LogRow["level"] {
+      const upper = (lv || "").toUpperCase();
+      if (upper === "WARNING") return "WARN";
+      if (upper === "CRITICAL") return "ERROR";
+      if (upper === "DEBUG") return "INFO";
+      if (upper === "ERROR") return "ERROR";
+      if (upper === "INFO") return "INFO";
+      return "INFO";
+    }
+
+    async function load() {
+      setLoading(true);
+      setError(null);
+      try {
+        const token = window.localStorage.getItem("access_token");
+        const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
+
+        const [statusRes, logsRes] = await Promise.all([
+          fetch(`${BACKEND_URL}/admin/system/status`, { headers }),
+          fetch(`${BACKEND_URL}/admin/system/logs?limit=200`, { headers }),
+        ]);
+
+        const badAuth = (res: Response) => res.status === 401 || res.status === 403;
+        if (badAuth(statusRes) || badAuth(logsRes)) {
+          const code = badAuth(statusRes) ? statusRes.status : logsRes.status;
+          throw new Error(
+            code === 401
+              ? "Chưa đăng nhập (401). Hãy login để lấy access_token."
+              : "Không đủ quyền (403). Tài khoản phải có role=admin.",
+          );
+        }
+
+        if (!statusRes.ok) throw new Error(`Lỗi tải system status (${statusRes.status}).`);
+        if (!logsRes.ok) throw new Error(`Lỗi tải system logs (${logsRes.status}).`);
+
+        const statusJson = (await statusRes.json()) as SystemStatus;
+        const apiLogs = (await logsRes.json()) as ApiLogItem[];
+
+        const mapped: LogRow[] = apiLogs
+          .slice()
+          .reverse()
+          .map((l) => ({
+            id: l.id,
+            time: l.time,
+            level: mapLevel(l.level),
+            service: l.logger,
+            message: l.message,
+            user: "—",
+          }));
+
+        if (!cancelled) {
+          setStatus(statusJson);
+          setLogs(mapped);
+        }
+      } catch (e: any) {
+        if (!cancelled) setError(e?.message ?? "Không thể tải dữ liệu");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const filtered = React.useMemo(() => {
     const q = search.trim().toLowerCase();
-    return EXTENDED_LOGS.filter((l) => {
+    return logs.filter((l) => {
       if (level !== "ALL" && l.level !== level) return false;
       if (!q) return true;
       return [l.time, l.level, l.service, l.message, l.user, String(l.id)].some(
         (v) => String(v).toLowerCase().includes(q),
       );
     });
-  }, [search, level]);
+  }, [search, level, logs]);
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -62,6 +163,14 @@ export default function SystemLogsView() {
             className="w-full pl-9 pr-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
           />
         </div>
+
+        {status && !error && (
+          <div className="mt-4 text-xs text-slate-500">
+            Backend: {status.app_name} • Users: {status.users_count} • DB: {status.db_ok ? "OK" : "ERROR"}
+          </div>
+        )}
+
+        {error && <div className="mt-4 text-sm text-rose-600">{error}</div>}
       </div>
 
       <div className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
@@ -87,6 +196,17 @@ export default function SystemLogsView() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
+              {loading && (
+                <tr>
+                  <td
+                    colSpan={5}
+                    className="p-10 text-center text-sm text-slate-500"
+                  >
+                    Đang tải system logs…
+                  </td>
+                </tr>
+              )}
+
               {filtered.map((l) => (
                 <tr key={l.id} className="hover:bg-slate-50 transition-colors">
                   <td className="p-4 text-sm text-slate-600 font-mono">
@@ -103,7 +223,7 @@ export default function SystemLogsView() {
                 </tr>
               ))}
 
-              {filtered.length === 0 && (
+              {!loading && filtered.length === 0 && (
                 <tr>
                   <td
                     colSpan={5}

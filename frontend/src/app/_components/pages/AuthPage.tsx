@@ -14,15 +14,21 @@ import {
 } from "lucide-react";
 import GoogleIcon from "../icons/GoogleIcon";
 import type { ViewKey } from "../../_types/app";
+import { BACKEND_URL } from "../../_config/app";
 
 type Props = {
   onNavigate: (view: ViewKey) => void;
+  onAuthSuccess?: (role: "user" | "admin") => void;
 };
 
-export default function AuthPage({ onNavigate }: Props) {
+import { useAuth } from "../auth/AuthContext";
+
+export default function AuthPage({ onNavigate, onAuthSuccess }: Props) {
   const [isLogin, setIsLogin] = useState(true);
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const { setAuth } = useAuth();
 
   const [formData, setFormData] = useState({
     name: "",
@@ -39,10 +45,73 @@ export default function AuthPage({ onNavigate }: Props) {
     e.preventDefault();
     setIsLoading(true);
 
-    setTimeout(() => {
+    setError(null);
+
+    try {
+      if (!isLogin) {
+        if (formData.password !== formData.confirmPassword) {
+          throw new Error("Mật khẩu xác nhận không khớp.");
+        }
+
+        const regRes = await fetch(`${BACKEND_URL}/auth/register`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            email: formData.email,
+            password: formData.password,
+          }),
+        });
+
+        if (!regRes.ok) {
+          const msg = await regRes.text();
+          throw new Error(msg || `Đăng ký thất bại (${regRes.status}).`);
+        }
+
+        // Sau khi đăng ký thành công, chuyển sang form đăng nhập
+        setIsLogin(true);
+        setIsLoading(false);
+        setFormData((prev) => ({ ...prev, password: "", confirmPassword: "" }));
+        setError("Đăng ký thành công! Vui lòng đăng nhập.");
+        return;
+      }
+
+      // Đăng nhập
+      const loginRes = await fetch(`${BACKEND_URL}/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: formData.email,
+          password: formData.password,
+        }),
+      });
+
+      if (!loginRes.ok) {
+        const msg = await loginRes.text();
+        throw new Error(msg || `Đăng nhập thất bại (${loginRes.status}).`);
+      }
+
+      const tokenJson = (await loginRes.json()) as { access_token: string };
+      setAuth(tokenJson.access_token);
+
+      const meRes = await fetch(`${BACKEND_URL}/auth/me`, {
+        headers: { Authorization: `Bearer ${tokenJson.access_token}` },
+      });
+
+      if (!meRes.ok) {
+        throw new Error("Không thể lấy thông tin tài khoản.");
+      }
+
+      const me = (await meRes.json()) as { role: "user" | "admin" };
+      if (onAuthSuccess) {
+        onAuthSuccess(me.role);
+      } else {
+        onNavigate("home");
+      }
+    } catch (err: any) {
+      setError(err?.message ?? "Có lỗi xảy ra");
+    } finally {
       setIsLoading(false);
-      onNavigate("home");
-    }, 1200);
+    }
   };
 
   return (
@@ -255,6 +324,10 @@ export default function AuthPage({ onNavigate }: Props) {
               )}
               {!isLoading && <ArrowRight className="ml-2 h-4 w-4" />}
             </button>
+
+            {error && (
+              <div className="text-sm text-rose-600 text-center">{error}</div>
+            )}
 
             <div className="relative">
               <div className="absolute inset-0 flex items-center">

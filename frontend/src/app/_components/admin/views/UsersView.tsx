@@ -2,9 +2,16 @@
 
 import React from "react";
 import { Edit2, Search, UserPlus } from "lucide-react";
-import { MOCK_USERS } from "../_data/mock";
-import type { UserRow } from "../_data/mock";
 import { RoleBadge, StatusBadge } from "../_ui/Badges";
+import { BACKEND_URL } from "../../../_config/app";
+import type { UserRow } from "../_data/mock";
+
+type AdminUser = {
+  id: number;
+  email: string;
+  role: string;
+  created_at: string;
+};
 
 type Props = {
   onAddUser: () => void;
@@ -13,16 +20,69 @@ type Props = {
 
 export default function UsersView({ onAddUser, onEditUser }: Props) {
   const [search, setSearch] = React.useState("");
+  const [loading, setLoading] = React.useState(true);
+  const [error, setError] = React.useState<string | null>(null);
+  const [rows, setRows] = React.useState<UserRow[]>([]);
+
+  React.useEffect(() => {
+    let cancelled = false;
+
+    async function load() {
+      setLoading(true);
+      setError(null);
+      try {
+        const token = window.localStorage.getItem("access_token");
+        const res = await fetch(`${BACKEND_URL}/admin/users`, {
+          headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+        });
+
+        if (res.status === 401) {
+          throw new Error("Chưa đăng nhập (401). Hãy login để lấy access_token.");
+        }
+        if (res.status === 403) {
+          throw new Error("Không đủ quyền (403). Tài khoản phải có role=admin.");
+        }
+        if (!res.ok) {
+          throw new Error(`Lỗi tải danh sách users (${res.status}).`);
+        }
+
+        const data = (await res.json()) as AdminUser[];
+        const mapped: UserRow[] = data.map((u) => {
+          const created = u.created_at ? new Date(u.created_at) : null;
+          return {
+            id: String(u.id),
+            name: u.email,
+            email: u.email,
+            role: u.role === "admin" ? "Admin" : "User",
+            status: "active",
+            lastLogin: "—",
+            joinDate: created ? created.toLocaleString() : "—",
+          };
+        });
+
+        if (!cancelled) setRows(mapped);
+      } catch (e: any) {
+        if (!cancelled) setError(e?.message ?? "Không thể tải dữ liệu");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const filtered = React.useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return MOCK_USERS;
-    return MOCK_USERS.filter((u) =>
+    if (!q) return rows;
+    return rows.filter((u) =>
       [u.id, u.name, u.email, u.role, u.status].some((v) =>
         String(v).toLowerCase().includes(q),
       ),
     );
-  }, [search]);
+  }, [search, rows]);
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -60,10 +120,20 @@ export default function UsersView({ onAddUser, onEditUser }: Props) {
           </div>
 
           <div className="text-sm text-slate-500">
-            Hiển thị <span className="font-semibold">{filtered.length}</span> /{" "}
-            {MOCK_USERS.length}
+            {loading ? (
+              "Đang tải…"
+            ) : (
+              <>
+                Hiển thị <span className="font-semibold">{filtered.length}</span> /{" "}
+                {rows.length}
+              </>
+            )}
           </div>
         </div>
+
+        {error && (
+          <div className="mt-4 text-sm text-rose-600">{error}</div>
+        )}
       </div>
 
       <div className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
@@ -92,6 +162,17 @@ export default function UsersView({ onAddUser, onEditUser }: Props) {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
+              {loading && (
+                <tr>
+                  <td
+                    colSpan={6}
+                    className="p-10 text-center text-sm text-slate-500"
+                  >
+                    Đang tải danh sách người dùng…
+                  </td>
+                </tr>
+              )}
+
               {filtered.map((u) => (
                 <tr key={u.id} className="hover:bg-slate-50 transition-colors">
                   <td className="p-4">
@@ -121,7 +202,7 @@ export default function UsersView({ onAddUser, onEditUser }: Props) {
                 </tr>
               ))}
 
-              {filtered.length === 0 && (
+              {!loading && filtered.length === 0 && (
                 <tr>
                   <td
                     colSpan={6}

@@ -3,6 +3,8 @@
 import React from "react";
 import { Menu, Upload, X } from "lucide-react";
 import type { ViewKey } from "../../_types/app";
+import UserInfoButton from "../auth/UserInfoButton";
+import { useAuth } from "../auth/AuthContext";
 
 type Props = {
   view: ViewKey;
@@ -17,6 +19,7 @@ export default function Header({
   onToggleMobileMenu,
   onNavigate,
 }: Props) {
+  const { email } = useAuth();
   return (
     <header className="sticky top-0 z-50 bg-white border-b border-gray-100">
       <nav className="flex items-center justify-between px-4 sm:px-6 py-4">
@@ -66,12 +69,16 @@ export default function Header({
         </div>
 
         <div className="hidden md:flex items-center gap-3">
-          <button
-            onClick={() => onNavigate("login")}
-            className="px-4 py-2 text-sm font-medium border border-blue-200 text-blue-700 rounded-lg hover:bg-blue-50 active:scale-[0.98] active:shadow-inner transition duration-150 shadow-sm flex items-center gap-2"
-          >
-            Đăng nhập
-          </button>
+          {email ? (
+            <UserInfoButton />
+          ) : (
+            <button
+              onClick={() => onNavigate("login")}
+              className="px-4 py-2 text-sm font-medium border border-blue-200 text-blue-700 rounded-lg hover:bg-blue-50 active:scale-[0.98] active:shadow-inner transition duration-150 shadow-sm flex items-center gap-2"
+            >
+              Đăng nhập
+            </button>
+          )}
           <button
             onClick={() => onNavigate("tools")}
             className="px-4 py-2 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-shadow shadow-md shadow-blue-200 flex items-center gap-2"
@@ -125,12 +132,18 @@ export default function Header({
               Giới thiệu & FAQ
             </button>
             <div className="flex flex-col gap-2 pt-2">
-              <button
-                onClick={() => onNavigate("login")}
-                className="w-full px-4 py-2 text-sm font-medium border border-blue-200 text-blue-700 rounded-lg hover:bg-blue-50 active:scale-[0.98] active:shadow-inner transition duration-150 shadow-sm flex items-center justify-center gap-2"
-              >
-                Đăng nhập
-              </button>
+              {email ? (
+                <div className="w-full flex justify-start">
+                  <UserInfoButton />
+                </div>
+              ) : (
+                <button
+                  onClick={() => onNavigate("login")}
+                  className="w-full px-4 py-2 text-sm font-medium border border-blue-200 text-blue-700 rounded-lg hover:bg-blue-50 active:scale-[0.98] active:shadow-inner transition duration-150 shadow-sm flex items-center justify-center gap-2"
+                >
+                  Đăng nhập
+                </button>
+              )}
               <button
                 onClick={() => onNavigate("tools")}
                 className="w-full px-4 py-2 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-shadow shadow-md shadow-blue-200 flex items-center justify-center gap-2"
