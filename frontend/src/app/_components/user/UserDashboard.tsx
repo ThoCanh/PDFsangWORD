@@ -10,7 +10,7 @@ import { useAuth } from "../auth/AuthContext";
 export default function UserDashboard() {
   const router = useRouter();
   const [activeTool, setActiveTool] = React.useState<ToolKey>("pdf-word");
-  const { setAuth } = useAuth();
+  const { logout } = useAuth();
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -24,7 +24,7 @@ export default function UserDashboard() {
             <UserInfoButton />
             <button
               onClick={() => {
-                setAuth(null);
+                logout();
                 router.replace("/login");
               }}
               className="px-3 py-2 text-sm font-medium border border-slate-200 rounded-lg hover:bg-slate-50"

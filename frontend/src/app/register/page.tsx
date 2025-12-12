@@ -12,7 +12,7 @@ export default function Page() {
       }}
       onAuthSuccess={(role) => {
         if (role === "admin") router.replace("/admin");
-        else router.replace("/");
+        else router.replace("/dashboard");
       }}
     />
   );

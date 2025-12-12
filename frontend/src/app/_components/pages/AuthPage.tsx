@@ -28,6 +28,14 @@ export default function AuthPage({ onNavigate, onAuthSuccess }: Props) {
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+    // Default to register mode if on /register route
+    React.useEffect(() => {
+      if (typeof window !== "undefined") {
+        if (window.location.pathname.toLowerCase().endsWith("/register")) {
+          setIsLogin(false);
+        }
+      }
+    }, []);
   const { setAuth } = useAuth();
 
   const [formData, setFormData] = useState({

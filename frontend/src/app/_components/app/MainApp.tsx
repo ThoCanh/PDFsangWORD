@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
+import { usePathname, useRouter } from "next/navigation";
 import type { ToolKey } from "../../_config/tools";
 import type { SelectedPlan, ViewKey } from "../../_types/app";
 import Header from "./Header";
@@ -15,15 +16,41 @@ export default function MainApp() {
   const [activeTool, setActiveTool] = useState<ToolKey>("pdf-word");
   const [selectedPlan, setSelectedPlan] = useState<SelectedPlan>(null);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const pathname = usePathname();
+  const router = useRouter();
 
   const navigateTo = (page: ViewKey) => {
     setView(page);
     setIsMobileMenuOpen(false);
+    // Keep URL in sync with view for deep-linking
+    const path =
+      page === "home"
+        ? "/"
+        : page === "tools"
+        ? "/Tools"
+        : page === "pricing"
+        ? "/upgrade"
+        : page === "about"
+        ? "/introduce"
+        : page === "login"
+        ? "/login"
+        : "/";
+    router.replace(path);
   };
 
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: "smooth" });
   }, [view]);
+
+  // Map URL path to view so non-root routes preserve the same layout
+  useEffect(() => {
+    const p = (pathname || "/").toLowerCase();
+    if (p === "/") setView("home");
+    else if (p === "/tools") setView("tools");
+    else if (p === "/upgrade") setView("pricing");
+    else if (p === "/introduce") setView("about");
+    else if (p === "/login" || p === "/register") setView("login");
+  }, [pathname]);
 
   const selectToolAndGoHome = (tool: ToolKey) => {
     setActiveTool(tool);

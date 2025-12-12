@@ -7,6 +7,7 @@ type AuthContextType = {
   role: string | null;
   refresh: () => void;
   setAuth: (token: string | null) => void;
+  logout: () => void;
 };
 
 const AuthContext = createContext<AuthContextType>({
@@ -14,6 +15,7 @@ const AuthContext = createContext<AuthContextType>({
   role: null,
   refresh: () => {},
   setAuth: () => {},
+  logout: () => {},
 });
 
 export function useAuth() {
@@ -57,6 +59,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     refresh();
   }, [refresh]);
 
+  const logout = React.useCallback(() => {
+    window.localStorage.removeItem("access_token");
+    setEmail(null);
+    setRole(null);
+    // Broadcast storage change to other tabs/components
+    try {
+      window.dispatchEvent(new StorageEvent("storage", { key: "access_token" }));
+    } catch {}
+  }, []);
+
   useEffect(() => {
     refresh();
     window.addEventListener("storage", refresh);
@@ -66,7 +78,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [refresh]);
 
   return (
-    <AuthContext.Provider value={{ email, role, refresh, setAuth }}>
+    <AuthContext.Provider value={{ email, role, refresh, setAuth, logout }}>
       {children}
     </AuthContext.Provider>
   );
