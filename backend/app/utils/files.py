@@ -21,10 +21,25 @@ def safe_filename(stem: str, fallback: str = "file") -> str:
 
 
 def which(executable: str, explicit_path: str | None = None) -> str | None:
+    """Return absolute path to an executable.
+
+    explicit_path can be either a direct path to the binary or a directory
+    containing it (common for Windows installs like LibreOffice).
+    """
+
     if explicit_path:
         p = Path(explicit_path)
-        if p.exists():
+        if p.is_file():
             return str(p)
+        if p.is_dir():
+            candidates = [
+                p / executable,
+                p / f"{executable}.exe",
+                p / f"{executable}.com",
+            ]
+            for c in candidates:
+                if c.exists():
+                    return str(c)
     return shutil.which(executable)
 
 

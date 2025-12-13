@@ -18,6 +18,7 @@ def convert_pdf_to_docx(
     out_dir: Path,
     soffice_path: str,
     timeout_sec: int,
+    user_install_dir: Path | None = None,
 ) -> Path:
     """Convert PDF to DOCX using LibreOffice (Tier A).
 
@@ -35,6 +36,12 @@ def convert_pdf_to_docx(
         "--nologo",
         "--nofirststartwizard",
         "--norestore",
+    ]
+    if user_install_dir:
+        user_install_dir.mkdir(parents=True, exist_ok=True)
+        cmd.append(f"-env:UserInstallation={user_install_dir.as_uri()}")
+
+    cmd += [
         "--convert-to",
         "docx",
         "--outdir",

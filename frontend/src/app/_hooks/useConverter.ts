@@ -197,7 +197,27 @@ export function useConverter({
           triggerDownload(blob, outName);
         } else {
           setStatus("error");
-          setErrorMessage(`Lỗi Server: ${this.statusText}`);
+          const fallback = `Lỗi Server: ${this.status} ${this.statusText}`.trim();
+
+          const resp = this.response as unknown;
+          if (resp instanceof Blob) {
+            resp
+              .text()
+              .then((t) => {
+                try {
+                  const parsed = JSON.parse(t) as { detail?: string };
+                  if (parsed?.detail) setErrorMessage(`Lỗi Server: ${parsed.detail}`);
+                  else if (t) setErrorMessage(`Lỗi Server: ${t}`);
+                  else setErrorMessage(fallback);
+                } catch {
+                  if (t) setErrorMessage(`Lỗi Server: ${t}`);
+                  else setErrorMessage(fallback);
+                }
+              })
+              .catch(() => setErrorMessage(fallback));
+          } else {
+            setErrorMessage(fallback);
+          }
         }
       };
 

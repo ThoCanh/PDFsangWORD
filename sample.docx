@@ -1,0 +1,1 @@
+{"detail":"Unable to produce editable DOCX. Install/configure LibreOffice and (for scanned PDFs) OCRmyPDF + Tesseract, or disable PREFER_EDITABLE to allow image fallback."}

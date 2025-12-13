@@ -31,8 +31,19 @@ class Settings:
     # Conversion
     max_upload_mb: int = int(os.getenv("MAX_UPLOAD_MB", "20"))
     conversion_timeout_sec: int = int(os.getenv("CONVERSION_TIMEOUT_SEC", "120"))
-    max_pages: int = int(os.getenv("PDF_MAX_PAGES", "80"))
+    # PDF_MAX_PAGES=0 means no limit (convert all pages).
+    max_pages: int = int(os.getenv("PDF_MAX_PAGES", "300"))
     prefer_editable: bool = os.getenv("PREFER_EDITABLE", "true").lower() in ("1", "true", "yes")
+
+    # Adobe PDF Services API (PDF -> DOCX)
+    # IMPORTANT: keep credentials server-side only.
+    adobe_base_url: str = os.getenv("ADOBE_PDF_SERVICES_BASE_URL", "https://pdf-services.adobe.io").rstrip("/")
+    adobe_client_id: str | None = os.getenv("ADOBE_CLIENT_ID")
+    adobe_client_secret: str | None = os.getenv("ADOBE_CLIENT_SECRET")
+    adobe_job_timeout_sec: int = int(os.getenv("ADOBE_JOB_TIMEOUT_SEC", "240"))
+    adobe_poll_interval_ms: int = int(os.getenv("ADOBE_POLL_INTERVAL_MS", "1500"))
+    # OCR language (Adobe expects locale-style strings like vi-VN, en-US)
+    adobe_ocr_lang: str = os.getenv("ADOBE_OCR_LANG", "vi-VN")
 
     # Tier A (LibreOffice)
     libreoffice_path: str | None = os.getenv("LIBREOFFICE_PATH")
@@ -42,6 +53,7 @@ class Settings:
     ocr_enabled: bool = os.getenv("OCR_ENABLED", "true").lower() in ("1", "true", "yes")
     ocr_lang: str = os.getenv("OCR_LANG", "vie+eng")
     ocr_timeout_sec: int = int(os.getenv("OCR_TIMEOUT_SEC", "180"))
+    tesseract_path: str | None = os.getenv("TESSERACT_PATH")
 
     # Tier B (Image fallback)
     pdf_image_dpi: int = int(os.getenv("PDF_IMAGE_DPI", "250"))

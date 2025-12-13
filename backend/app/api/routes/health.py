@@ -18,8 +18,49 @@ def conversion_health():
 
     ocrmypdf = which("ocrmypdf", settings.ocrmypdf_path)
 
+    try:
+        import fitz  # noqa: F401
+
+        pymupdf_available = True
+    except Exception:  # noqa: BLE001
+        pymupdf_available = False
+
+    try:
+        import pdf2docx  # noqa: F401
+
+        pdf2docx_available = True
+    except Exception:  # noqa: BLE001
+        pdf2docx_available = False
+
+    try:
+        import aspose.words  # noqa: F401
+
+        aspose_words_available = True
+    except Exception:  # noqa: BLE001
+        aspose_words_available = False
+
+    try:
+        import httpx  # noqa: F401
+
+        httpx_available = True
+    except Exception:  # noqa: BLE001
+        httpx_available = False
+
     return {
         "prefer_editable": settings.prefer_editable,
+        "adobe_pdf_services": {
+            "configured": bool(settings.adobe_client_id and settings.adobe_client_secret),
+            "base_url": settings.adobe_base_url,
+            "ocr_lang": settings.adobe_ocr_lang,
+            "httpx_available": httpx_available,
+        },
+        "pdf2docx": {
+            "available": pdf2docx_available,
+            "pymupdf_available": pymupdf_available,
+        },
+        "aspose_words": {
+            "available": aspose_words_available,
+        },
         "libreoffice": {
             "configured_path": settings.libreoffice_path,
             "resolved_path": soffice,

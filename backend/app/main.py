@@ -21,6 +21,11 @@ if origins:
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
+        expose_headers=[
+            "X-Conversion-Mode",
+            "X-PDF-Has-Text",
+            "Content-Disposition",
+        ],
     )
 
 app.include_router(api_router)

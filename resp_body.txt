@@ -1,0 +1,1 @@
+{"detail":"Unable to produce editable DOCX. has_text_layer=True. libreoffice_error=LibreOffice conversion timed out. ocr_error=n/a. Check LibreOffice, OCRmyPDF + Tesseract (and Ghostscript on Windows), or disable PREFER_EDITABLE to allow image fallback."}

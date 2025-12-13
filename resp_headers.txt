@@ -1,0 +1,12 @@
+HTTP/1.1 200 OK
+date: Sat, 13 Dec 2025 05:47:46 GMT
+server: uvicorn
+x-conversion-mode: tier-a
+x-pdf-has-text: 1
+content-type: application/vnd.openxmlformats-officedocument.wordprocessingml.document
+accept-ranges: bytes
+content-disposition: attachment; filename="sample.docx"
+content-length: 564675
+last-modified: Sat, 13 Dec 2025 05:50:57 GMT
+etag: "81387d4af11172faf4c72b97a4146755"
+

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 
@@ -19,6 +20,7 @@ def run_ocrmypdf(
     ocrmypdf_path: str,
     lang: str,
     timeout_sec: int,
+    extra_path: str | None = None,
 ) -> Path:
     """Runs OCRmyPDF to create a searchable PDF (text layer).
 
@@ -42,6 +44,10 @@ def run_ocrmypdf(
         str(output_pdf),
     ]
 
+    env = os.environ.copy()
+    if extra_path:
+        env["PATH"] = f"{extra_path};{env.get('PATH','')}"
+
     try:
         subprocess.run(
             cmd,
@@ -49,6 +55,7 @@ def run_ocrmypdf(
             capture_output=True,
             text=True,
             timeout=timeout_sec,
+            env=env,
         )
     except subprocess.TimeoutExpired as e:
         raise OcrFailedError("OCR timed out") from e
