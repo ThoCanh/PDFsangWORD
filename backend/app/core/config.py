@@ -40,8 +40,6 @@ class Settings:
     adobe_base_url: str = os.getenv("ADOBE_PDF_SERVICES_BASE_URL", "https://pdf-services.adobe.io").rstrip("/")
     adobe_client_id: str | None = os.getenv("ADOBE_CLIENT_ID")
     adobe_client_secret: str | None = os.getenv("ADOBE_CLIENT_SECRET")
-    # If true, do not fall back to Aspose/pdf2docx; fail instead.
-    adobe_required: bool = os.getenv("ADOBE_REQUIRED", "false").lower() in ("1", "true", "yes")
     adobe_job_timeout_sec: int = int(os.getenv("ADOBE_JOB_TIMEOUT_SEC", "240"))
     adobe_poll_interval_ms: int = int(os.getenv("ADOBE_POLL_INTERVAL_MS", "1500"))
     # OCR language (Adobe expects locale-style strings like vi-VN, en-US)
