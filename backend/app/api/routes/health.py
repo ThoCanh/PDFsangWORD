@@ -50,6 +50,7 @@ def conversion_health():
         "prefer_editable": settings.prefer_editable,
         "adobe_pdf_services": {
             "configured": bool(settings.adobe_client_id and settings.adobe_client_secret),
+            "required": settings.adobe_required,
             "base_url": settings.adobe_base_url,
             "ocr_lang": settings.adobe_ocr_lang,
             "httpx_available": httpx_available,

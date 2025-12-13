@@ -105,6 +105,11 @@ def convert_pdf_to_docx_pipeline(*, pdf_path: Path, work_dir: Path) -> PdfToDocx
 
     adobe_enabled = bool(settings.adobe_client_id and settings.adobe_client_secret)
 
+    if settings.adobe_required and not adobe_enabled:
+        raise EditableConversionUnavailable(
+            "Adobe conversion is required (ADOBE_REQUIRED=true) but ADOBE_CLIENT_ID/ADOBE_CLIENT_SECRET are not configured."
+        )
+
     # Tier A (Adobe PDF Services API preferred when configured)
     if adobe_enabled:
         try:
@@ -169,6 +174,13 @@ def convert_pdf_to_docx_pipeline(*, pdf_path: Path, work_dir: Path) -> PdfToDocx
             )
         except AdobePdfServicesConvertError as e:
             adobe_error = str(e)
+
+            # If Adobe is required, do not fall back to Aspose/pdf2docx.
+            if settings.adobe_required:
+                raise EditableConversionUnavailable(
+                    "Adobe conversion is required (ADOBE_REQUIRED=true) but Adobe conversion failed. "
+                    f"adobe_error={adobe_error}"
+                ) from e
 
     # Tier A (Aspose.Words preferred):
     # - If PDF already has a text layer, convert directly.
