@@ -15,10 +15,12 @@ app = FastAPI(title=settings.app_name)
 
 origins = [o.strip() for o in settings.cors_origins.split(",") if o.strip()]
 if origins:
+    allow_all = "*" in origins
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=origins,
-        allow_credentials=True,
+        allow_origins=["*"] if allow_all else origins,
+        # If allow_origins is '*', credentials must be disabled for browsers.
+        allow_credentials=False if allow_all else True,
         allow_methods=["*"],
         allow_headers=["*"],
         expose_headers=[

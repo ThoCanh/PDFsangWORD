@@ -1,0 +1,21 @@
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "8003:8000"
+    env_file:
+      - ./backend/.env
+    environment:
+      # NOTE: Docker Desktop on Windows may not have IPv6 connectivity, which can break some hosted Postgres URLs.
+      # Use SQLite inside the container by default so the backend can start reliably.
+      - DATABASE_URL=sqlite:////data/docuflow.db
+      # For local dev, avoid CORS issues when accessing FE via localhost/lan IP.
+      - CORS_ORIGINS=*
+    volumes:
+      - backend_data:/data
+    restart: unless-stopped
+
+volumes:
+  backend_data:
