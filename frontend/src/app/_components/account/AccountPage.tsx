@@ -23,7 +23,9 @@ import {
   Globe,
 } from "lucide-react";
 
+import { BACKEND_URL } from "../../_config/app";
 import { useAuth } from "../auth/AuthContext";
+import { getAccessToken } from "../auth/token";
 
 type TabKey = "profile" | "subscription" | "settings";
 type SaveStatus = "idle" | "saving";
@@ -317,33 +319,83 @@ function ProfileTab({
 }
 
 function SubscriptionTab() {
-  const plans = [
-    {
-      name: "Starter",
-      price: "0đ",
-      period: "/tháng",
-      features: ["10 Tài liệu/tháng", "AI Credits cơ bản", "Hỗ trợ qua Email"],
-      current: true,
-    },
-    {
-      name: "Pro",
-      price: "199k",
-      period: "/tháng",
-      features: [
-        "Không giới hạn tài liệu",
-        "AI Credits cao cấp",
-        "Ưu tiên xử lý",
-        "Xuất PDF/Docx",
-      ],
-      popular: true,
-    },
-    {
-      name: "Business",
-      price: "Liên hệ",
-      period: "",
-      features: ["API Access", "SSO Login", "Quản lý team", "Hỗ trợ 24/7"],
-    },
-  ];
+  return null;
+}
+
+type BillingPlan = {
+  id: number;
+  name: string;
+  price_vnd: number;
+  billing_cycle: string;
+  doc_limit_per_month: number;
+  features: string[];
+  notes: string | null;
+};
+
+function formatPrice(vnd: number) {
+  try {
+    return new Intl.NumberFormat("vi-VN").format(vnd) + "đ";
+  } catch {
+    return String(vnd) + "đ";
+  }
+}
+
+function formatCycle(cycle: string) {
+  const c = (cycle || "").toLowerCase();
+  if (c === "month") return "/tháng";
+  if (c === "year") return "/năm";
+  if (c === "lifetime") return "";
+  return c ? `/${cycle}` : "";
+}
+
+function isContactPlanName(name: string) {
+  const n = (name || "").trim().toLowerCase();
+  return n === "liên hệ" || n === "lien he" || n === "lien hệ";
+}
+
+function SubscriptionTabDynamic({
+  plans,
+  planKey,
+  loading,
+  error,
+}: {
+  plans: BillingPlan[];
+  planKey: string | null;
+  loading: boolean;
+  error: string | null;
+}) {
+  const router = useRouter();
+  const cards = useMemo(() => {
+    const sorted = plans.slice().sort((a, b) => {
+      const aContact = isContactPlanName(a.name);
+      const bContact = isContactPlanName(b.name);
+      if (aContact && !bContact) return 1;
+      if (!aContact && bContact) return -1;
+      return (a.price_vnd ?? 0) - (b.price_vnd ?? 0);
+    });
+    return sorted;
+  }, [plans]);
+
+  const currentPlanId = useMemo(() => {
+    if (planKey && planKey.startsWith("plan:")) {
+      const id = Number(planKey.split(":", 2)[1]);
+      return Number.isFinite(id) ? id : null;
+    }
+
+    if (planKey === "free" || !planKey) {
+      const freeCandidate = cards.find((p) => !isContactPlanName(p.name) && (p.price_vnd ?? 0) === 0);
+      return freeCandidate ? freeCandidate.id : null;
+    }
+
+    return null;
+  }, [cards, planKey]);
+
+  const [selectedPlanId, setSelectedPlanId] = useState<number | null>(null);
+
+  useEffect(() => {
+    // Default selection follows the currently active plan.
+    setSelectedPlanId(currentPlanId);
+  }, [currentPlanId]);
 
   return (
     <div className="space-y-8 animate-in fade-in slide-in-from-right-4 duration-300">
@@ -356,51 +408,103 @@ function SubscriptionTab() {
         </p>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        {plans.map((plan) => (
-          <div
-            key={plan.name}
-            className={`relative rounded-xl border p-6 flex flex-col ${
-              plan.popular
-                ? "border-blue-500 bg-blue-50/50 shadow-md"
-                : "border-slate-200 bg-white shadow-sm"
-            }`}
-          >
-            {plan.popular && (
-              <span className="absolute top-0 right-0 bg-blue-600 text-white text-xs font-bold px-3 py-1 rounded-bl-lg rounded-tr-lg">
-                Phổ biến
-              </span>
-            )}
-            <div className="mb-4">
-              <h3 className="text-lg font-bold text-slate-900">{plan.name}</h3>
-              <div className="flex items-baseline gap-1 mt-2">
-                <span className="text-3xl font-bold text-slate-900">
-                  {plan.price}
-                </span>
-                <span className="text-slate-500 text-sm">{plan.period}</span>
+      {loading ? (
+        <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-6 text-slate-500">
+          Đang tải danh sách gói…
+        </div>
+      ) : error ? (
+        <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-6 text-rose-600">
+          {error}
+        </div>
+      ) : (
+        <div className="w-full max-w-4xl mx-auto grid md:grid-cols-2 gap-8">
+          {cards.map((plan) => {
+            const contact = isContactPlanName(plan.name);
+            const isCurrent = currentPlanId != null && plan.id === currentPlanId;
+            const isFree = (plan.price_vnd ?? 0) === 0;
+            const isPaid = !isFree;
+            const isSelected = selectedPlanId != null && plan.id === selectedPlanId;
+
+            const cardClass = isPaid
+              ? `bg-slate-900 text-white p-8 rounded-2xl shadow-xl relative overflow-hidden cursor-pointer transition ${
+                  isSelected ? "ring-2 ring-blue-400 scale-[1.01]" : ""
+                }`
+              : `bg-white p-8 rounded-2xl border shadow-sm transition-all hover:shadow-md cursor-pointer ${
+                  isSelected
+                    ? "border-blue-500 shadow-lg shadow-blue-100 scale-[1.01]"
+                    : "border-slate-200"
+                }`;
+
+            const titleClass = isPaid
+              ? "text-lg font-medium text-blue-200 mb-2"
+              : "text-lg font-medium text-slate-700 mb-2";
+
+            const priceClass = isPaid
+              ? "text-4xl font-bold mb-6"
+              : "text-4xl font-bold text-slate-800 mb-6";
+
+            const priceUnitClass = "text-sm font-normal text-slate-400";
+
+            const okIconClass = isPaid ? "text-blue-400" : "text-green-500";
+            const okTextClass = isPaid ? "text-white" : "text-slate-600";
+
+            const buttonClass = isPaid
+              ? "w-full py-3 bg-blue-600 hover:bg-blue-500 text-white font-semibold rounded-xl transition-colors shadow-lg shadow-blue-900/50"
+              : isCurrent
+                ? "w-full py-3 border border-slate-300 text-slate-400 font-semibold rounded-xl cursor-not-allowed"
+                : "w-full py-3 border border-blue-600 text-blue-600 font-semibold rounded-xl hover:bg-blue-50 active:scale-[0.99] transition duration-150";
+
+            return (
+              <div
+                key={`plan:${plan.id}`}
+                role="button"
+                tabIndex={0}
+                onClick={() => setSelectedPlanId(plan.id)}
+                onKeyDown={(e) => e.key === "Enter" && setSelectedPlanId(plan.id)}
+                className={cardClass}
+              >
+                <div className={titleClass}>{plan.name}</div>
+                <div className={priceClass}>
+                  {contact ? "Liên hệ" : formatPrice(plan.price_vnd ?? 0)}
+                  {contact ? null : (
+                    <span className={priceUnitClass}>{formatCycle(plan.billing_cycle)}</span>
+                  )}
+                </div>
+
+                <ul className="space-y-3 mb-8">
+                  <li className={`flex items-center gap-3 ${okTextClass}`}>
+                    <Check size={18} className={okIconClass} /> {plan.doc_limit_per_month ?? 0} tài liệu/tháng
+                  </li>
+
+                  {(Array.isArray(plan.features) ? plan.features : []).map((feat) => (
+                    <li key={feat} className={`flex items-center gap-3 ${okTextClass}`}>
+                      <Check size={18} className={okIconClass} /> {feat}
+                    </li>
+                  ))}
+
+                  {plan.notes?.trim() ? (
+                    <li className={`flex items-center gap-3 ${okTextClass}`}>
+                      <Check size={18} className={okIconClass} /> {plan.notes.trim()}
+                    </li>
+                  ) : null}
+                </ul>
+
+                <button
+                  className={buttonClass}
+                  disabled={isCurrent}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setSelectedPlanId(plan.id);
+                    if (!isCurrent) router.push(`/payment/${encodeURIComponent(plan.name)}`);
+                  }}
+                >
+                  {isCurrent ? "Đang sử dụng" : "Nâng cấp ngay"}
+                </button>
               </div>
-            </div>
-            <ul className="space-y-3 mb-8 flex-1">
-              {plan.features.map((feat) => (
-                <li key={feat} className="flex items-center gap-2 text-sm text-slate-600">
-                  <Check size={16} className="text-emerald-600" /> {feat}
-                </li>
-              ))}
-            </ul>
-            <button
-              className={`w-full py-2.5 rounded-lg font-medium text-sm transition-all ${
-                plan.current
-                  ? "bg-slate-100 text-slate-500 cursor-default"
-                  : plan.popular
-                    ? "bg-blue-600 text-white hover:bg-blue-700 shadow-sm"
-                    : "bg-white border border-slate-300 text-slate-700 hover:bg-slate-50"
-              }`}
-            >
-              {plan.current ? "Đang sử dụng" : "Nâng cấp ngay"}
-            </button>
-          </div>
-        ))}
-      </div>
+            );
+          })}
+        </div>
+      )}
 
       <div className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
         <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/50">
@@ -615,7 +719,7 @@ function SettingsTab({
 }
 
 export default function AccountPage() {
-  const { email, role, refresh, logout } = useAuth();
+  const { email, role, planKey, refresh, logout } = useAuth();
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState<ToastState>(null);
@@ -644,6 +748,129 @@ export default function AccountPage() {
   useEffect(() => {
     refresh();
   }, [refresh]);
+
+  const [billingPlans, setBillingPlans] = useState<BillingPlan[]>([]);
+  const [billingPlansLoading, setBillingPlansLoading] = useState(false);
+  const [billingPlansError, setBillingPlansError] = useState<string | null>(null);
+
+  const [usageUsed, setUsageUsed] = useState<number>(0);
+  const [usageLimit, setUsageLimit] = useState<number>(0);
+  const [usageLoading, setUsageLoading] = useState(false);
+  const [usageLoadedFromServer, setUsageLoadedFromServer] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadPlans() {
+      setBillingPlansLoading(true);
+      setBillingPlansError(null);
+      try {
+        const res = await fetch(`${BACKEND_URL}/plans`);
+        if (!res.ok) throw new Error(`Không thể tải danh sách gói (${res.status}).`);
+        const data = (await res.json()) as unknown;
+        const next = Array.isArray(data) ? (data as BillingPlan[]) : [];
+        if (!cancelled) setBillingPlans(next);
+      } catch (e: unknown) {
+        if (!cancelled) setBillingPlansError(e instanceof Error ? e.message : "Không thể tải danh sách gói");
+      } finally {
+        if (!cancelled) setBillingPlansLoading(false);
+      }
+    }
+
+    void loadPlans();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const fallbackDocLimit = useMemo(() => {
+    // Use the same plan list shown to the user as a fallback source of truth.
+    if (planKey && planKey.startsWith("plan:")) {
+      const id = Number(planKey.split(":", 2)[1]);
+      if (Number.isFinite(id)) {
+        const found = billingPlans.find((p) => p.id === id);
+        return typeof found?.doc_limit_per_month === "number" ? found.doc_limit_per_month : 0;
+      }
+      return 0;
+    }
+
+    // Free plan: pick the 0đ, non-contact plan.
+    const free = billingPlans
+      .slice()
+      .sort((a, b) => (a.price_vnd ?? 0) - (b.price_vnd ?? 0))
+      .find((p) => !isContactPlanName(p.name) && (p.price_vnd ?? 0) === 0);
+    return typeof free?.doc_limit_per_month === "number" ? free.doc_limit_per_month : 0;
+  }, [billingPlans, planKey]);
+
+  useEffect(() => {
+    // Avoid showing 0/0 before server usage is fetched.
+    if (usageLoadedFromServer) return;
+    if (fallbackDocLimit > 0) setUsageLimit(fallbackDocLimit);
+  }, [fallbackDocLimit, usageLoadedFromServer]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadUsage() {
+      if (!email) return;
+      const token = getAccessToken();
+      if (!token) return;
+
+      setUsageLoading(true);
+      try {
+        const res = await fetch(`${BACKEND_URL}/convert/usage`, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
+        if (!res.ok) return;
+        const data = (await res.json()) as unknown;
+        const used = typeof (data as any)?.used === "number" ? (data as any).used : 0;
+        const limit = typeof (data as any)?.limit === "number" ? (data as any).limit : 0;
+        if (!cancelled) {
+          setUsageUsed(used);
+          setUsageLimit(limit);
+          setUsageLoadedFromServer(true);
+        }
+      } catch {
+        // ignore
+      } finally {
+        if (!cancelled) setUsageLoading(false);
+      }
+    }
+
+    void loadUsage();
+    return () => {
+      cancelled = true;
+    };
+  }, [email, planKey]);
+
+  const usagePercent = useMemo(() => {
+    if (!usageLimit || usageLimit <= 0) return 0;
+    return Math.min(100, Math.max(0, (usageUsed / usageLimit) * 100));
+  }, [usageLimit, usageUsed]);
+
+  const usageBarClass = useMemo(() => {
+    if (usagePercent >= 90) return "bg-rose-500";
+    if (usagePercent >= 80) return "bg-amber-500";
+    return "bg-blue-500";
+  }, [usagePercent]);
+
+  const currentPlanLabel = useMemo(() => {
+    if (!planKey || planKey === "free") {
+      const free = billingPlans
+        .slice()
+        .sort((a, b) => (a.price_vnd ?? 0) - (b.price_vnd ?? 0))
+        .find((p) => !isContactPlanName(p.name) && (p.price_vnd ?? 0) === 0);
+      return free?.name || "Free";
+    }
+    if (planKey.startsWith("plan:")) {
+      const id = Number(planKey.split(":", 2)[1]);
+      if (!Number.isFinite(id)) return "Không xác định";
+      const found = billingPlans.find((p) => p.id === id);
+      return found?.name || "Không xác định";
+    }
+    return "Free";
+  }, [billingPlans, planKey]);
 
   useEffect(() => {
     // Load persisted profile/settings
@@ -722,6 +949,7 @@ export default function AccountPage() {
     if (!ok) return;
     logout();
     setToast({ message: "Đã đăng xuất.", type: "success" });
+    router.push("/");
   };
 
   if (loading) return <SkeletonLoader />;
@@ -774,7 +1002,7 @@ export default function AccountPage() {
                     {formData.displayName || fallbackDisplayName}
                   </h2>
                   <p className="text-xs text-slate-500 font-medium">
-                    Gói Free
+                    Gói {currentPlanLabel}
                   </p>
                 </div>
               </div>
@@ -811,6 +1039,7 @@ export default function AccountPage() {
                 onClick={() => {
                   logout();
                   setToast({ message: "Đã đăng xuất.", type: "success" });
+                  router.push("/");
                 }}
                 className="w-full flex items-center gap-3 px-4 py-2.5 text-sm font-medium text-rose-600 hover:bg-rose-50 rounded-lg transition-all"
               >
@@ -827,19 +1056,15 @@ export default function AccountPage() {
               <div>
                 <div className="flex justify-between text-xs mb-1">
                   <span className="text-slate-600 font-medium">Tài liệu</span>
-                  <span className="font-bold">0/50</span>
+                  <span className="font-bold">
+                    {usageLoading ? "…" : `${usageUsed}/${usageLimit}`}
+                  </span>
                 </div>
                 <div className="w-full bg-slate-100 rounded-full h-1.5">
-                  <div className="bg-blue-500 h-1.5 rounded-full w-[0%]" />
-                </div>
-              </div>
-              <div>
-                <div className="flex justify-between text-xs mb-1">
-                  <span className="text-slate-600 font-medium">AI Credits</span>
-                  <span className="font-bold">0/1000</span>
-                </div>
-                <div className="w-full bg-slate-100 rounded-full h-1.5">
-                  <div className="bg-emerald-500 h-1.5 rounded-full w-[0%]" />
+                  <div
+                    className={`${usageBarClass} h-1.5 rounded-full`}
+                    style={{ width: `${usagePercent}%` }}
+                  />
                 </div>
               </div>
             </div>
@@ -865,7 +1090,14 @@ export default function AccountPage() {
               saveStatus={saveStatus}
             />
           )}
-          {activeTab === "subscription" && <SubscriptionTab />}
+          {activeTab === "subscription" && (
+            <SubscriptionTabDynamic
+              plans={billingPlans}
+              planKey={planKey}
+              loading={billingPlansLoading}
+              error={billingPlansError}
+            />
+          )}
           {activeTab === "settings" && (
             <SettingsTab
               language={language}

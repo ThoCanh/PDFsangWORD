@@ -10,7 +10,7 @@ from sqlalchemy import and_
 from sqlalchemy.orm import Session
 
 from ..deps import get_db
-from ..deps import get_optional_user
+from ..deps import get_current_user, get_optional_user
 from ...core.config import settings
 from ...services.image.jpg_to_png import JpgToPngError, convert_jpg_to_png
 from ...services.pdf.libreoffice import LibreOfficeConvertError, LibreOfficeNotFoundError, convert_word_to_pdf
@@ -19,6 +19,47 @@ from ...db.models import ConversionJob, Plan, User
 from ...utils.files import make_work_dir, remove_tree, safe_filename
 
 router = APIRouter()
+
+
+@router.get("/convert/usage")
+def get_my_usage(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Return current user's monthly usage stats for their current plan."""
+
+    plan: Plan | None = None
+    if current_user.plan_key and current_user.plan_key.startswith("plan:"):
+        try:
+            plan_id = int(current_user.plan_key.split(":", 1)[1])
+        except Exception:
+            raise HTTPException(status_code=422, detail="Invalid plan_key")
+        plan = db.get(Plan, plan_id)
+        if not plan:
+            raise HTTPException(status_code=404, detail="Plan not found")
+
+    now = datetime.now(timezone.utc)
+    month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+    limit = int(plan.doc_limit_per_month or 0) if plan is not None else int(settings.free_plan_doc_limit_per_month or 0)
+    used = (
+        db.query(ConversionJob)
+        .filter(
+            and_(
+                ConversionJob.user_id == current_user.id,
+                ConversionJob.created_at >= month_start,
+                ConversionJob.status != "failed",
+            )
+        )
+        .count()
+    )
+    remaining = max(limit - used, 0)
+    return {
+        "limit": limit,
+        "used": used,
+        "remaining": remaining,
+        "month_start": month_start.isoformat(),
+    }
 
 
 @router.get("/convert/check")

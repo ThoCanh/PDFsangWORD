@@ -2,6 +2,7 @@
 
 import React from "react";
 import { Check } from "lucide-react";
+import { useRouter } from "next/navigation";
 import type { SelectedPlan } from "../../_types/app";
 import { BACKEND_URL } from "../../_config/app";
 import { useAuth } from "../auth/AuthContext";
@@ -31,6 +32,7 @@ export default function PricingPage({
   onStartFree,
 }: Props) {
   const { email, planKey: authPlanKey } = useAuth();
+  const router = useRouter();
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
   const [plans, setPlans] = React.useState<
@@ -224,7 +226,13 @@ export default function PricingPage({
                   onClick={(e) => {
                     e.stopPropagation();
                     onSelectPlan(cardPlanKey);
-                    if (!isUsingFree && isFree && !isContact) void onStartFree();
+                    if (!isUsingFree && isFree && !isContact) {
+                      void onStartFree();
+                      return;
+                    }
+                    if (isPaid && !isContact) {
+                      router.push(`/payment/${encodeURIComponent(p.name)}`);
+                    }
                   }}
                   className={buttonClass}
                   disabled={isUsingFree}
@@ -235,7 +243,7 @@ export default function PricingPage({
                       ? isUsingFree
                         ? "Đang sử dụng"
                         : "Bắt đầu miễn phí"
-                      : "Chọn gói"}
+                      : "Nâng cấp ngay"}
                 </button>
               </div>
             );
