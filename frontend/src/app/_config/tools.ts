@@ -29,7 +29,7 @@ export const TOOL_CONFIG: Record<ToolKey, ToolConfig> = {
     mimeType: "image/jpeg",
     icon: ImageIcon,
     color: "green",
-    desc: "Chuyển đổi ảnh JPG sang định dạng PNG nền trong suốt.",
+    desc: "Chuyển đổi ảnh JPG sang định dạng PNG chất lượng cao.",
     outputExt: ".png",
   },
   "word-pdf": {
