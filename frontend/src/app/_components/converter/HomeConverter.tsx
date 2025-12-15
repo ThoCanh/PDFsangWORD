@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useEffect, useMemo } from "react";
+import React, { useCallback, useEffect, useMemo } from "react";
+import { useRouter } from "next/navigation";
 import {
   AlertCircle,
   Check,
@@ -18,6 +19,8 @@ import { TOOL_CONFIG, type ToolKey } from "../../_config/tools";
 import { useConverter } from "../../_hooks/useConverter";
 import { useGeminiAssistant } from "../../_hooks/useGeminiAssistant";
 import { useAuth } from "../auth/AuthContext";
+import { getAccessToken } from "../auth/token";
+import UpgradePlanNotification from "../modals/UpgradePlanNotification";
 
 type Props = {
   activeTool: ToolKey;
@@ -43,8 +46,20 @@ function uploadBadgeClass(activeTool: ToolKey) {
 }
 
 export default function HomeConverter({ activeTool, onSelectTool }: Props) {
+  const router = useRouter();
   const { planKey } = useAuth();
   const currentConfig = useMemo(() => TOOL_CONFIG[activeTool], [activeTool]);
+
+  const [gateOpen, setGateOpen] = React.useState(false);
+  const [gateTitle, setGateTitle] = React.useState("Giới hạn gói cước");
+  const [gateMessage, setGateMessage] = React.useState(
+    "Bạn đang sử dụng gói Free nên không thể sử dụng chức năng này.\n\nVui lòng nâng cấp để tiếp tục.",
+  );
+
+  const gateCooldownUntilRef = React.useRef<number>(0);
+  const lastAutoGateKeyRef = React.useRef<string>("");
+
+  const isFileDialogOpeningRef = React.useRef(false);
 
   const [allowedTools, setAllowedTools] = React.useState<Set<ToolKey> | null>(null);
 
@@ -69,10 +84,137 @@ export default function HomeConverter({ activeTool, onSelectTool }: Props) {
     converter.removeFile();
   };
 
+  const openGateModal = useCallback((reason?: string | null, detail?: string) => {
+    setGateTitle("Giới hạn gói cước");
+    if (reason === "quota_exceeded") {
+      setGateMessage(
+        detail ||
+          "Bạn đã hết lượt tài liệu trong tháng của gói hiện tại.\n\nVui lòng nâng cấp để tiếp tục.",
+      );
+    } else {
+      setGateMessage(
+        detail ||
+          "Bạn đang sử dụng gói Free nên không thể sử dụng chức năng này.\n\nVui lòng nâng cấp để tiếp tục.",
+      );
+    }
+    setGateOpen(true);
+  }, []);
+
+  const closeGateModal = useCallback(() => {
+    // Avoid click-through immediately after closing.
+    gateCooldownUntilRef.current = Date.now() + 450;
+    setGateOpen(false);
+  }, []);
+
+  const checkAccess = useCallback(async (tool: ToolKey) => {
+    if (IS_DEMO_MODE) return { allowed: true, reason: null, detail: null };
+
+    try {
+      const token = getAccessToken();
+      const res = await fetch(
+        `${BACKEND_URL}/convert/check?type=${encodeURIComponent(tool)}`,
+        {
+          headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+        },
+      );
+
+      if (!res.ok) {
+        // Fail-open: /convert will still enforce.
+        return { allowed: true, reason: null, detail: null };
+      }
+
+      const data = (await res.json()) as {
+        allowed?: boolean;
+        reason?: string | null;
+        detail?: string | null;
+      };
+
+      return {
+        allowed: Boolean(data?.allowed),
+        reason: (data?.reason ?? null) as string | null,
+        detail: (data?.detail ?? null) as string | null,
+      };
+    } catch {
+      return { allowed: true, reason: null, detail: null };
+    }
+  }, []);
+
+  const ensureAllowed = useCallback(
+    async (tool: ToolKey) => {
+      if (gateOpen) return false;
+      if (Date.now() < gateCooldownUntilRef.current) return false;
+
+      const checked = await checkAccess(tool);
+      if (!checked.allowed) {
+        openGateModal(checked.reason, checked.detail || undefined);
+        return false;
+      }
+      return true;
+    },
+    [checkAccess, gateOpen, openGateModal],
+  );
+
+  useEffect(() => {
+    // Ensure quota-exceeded is surfaced BEFORE the user tries to pick a file.
+    // Only auto-show for quota, not for tool-not-allowed (that one shows on interaction).
+    let cancelled = false;
+    void (async () => {
+      if (gateOpen) return;
+      if (Date.now() < gateCooldownUntilRef.current) return;
+
+      const checked = await checkAccess(activeTool);
+      if (cancelled) return;
+
+      if (!checked.allowed && checked.reason === "quota_exceeded") {
+        const key = `${activeTool}:${checked.reason}:${checked.detail ?? ""}`;
+        if (lastAutoGateKeyRef.current !== key) {
+          lastAutoGateKeyRef.current = key;
+          openGateModal(checked.reason, checked.detail || undefined);
+        }
+      } else {
+        lastAutoGateKeyRef.current = "";
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTool, gateOpen, openGateModal, checkAccess, planKey]);
+
+  useEffect(() => {
+    if (!converter.gateBlocked) return;
+    const reason = converter.gateBlocked.status === 429 ? "quota_exceeded" : "tool_not_allowed";
+    openGateModal(reason, converter.gateBlocked.detail);
+    converter.clearGateBlocked();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [converter.gateBlocked]);
+
   useEffect(() => {
     let cancelled = false;
 
     async function loadAllowedTools() {
+      // Free plan (also the default for guests)
+      if (!planKey || planKey === "free") {
+        try {
+          const res = await fetch(`${BACKEND_URL}/plans/free`);
+          if (!res.ok) {
+            if (!cancelled) setAllowedTools(null);
+            return;
+          }
+          const data = (await res.json()) as { tools?: string[] };
+          const tools = Array.isArray(data?.tools) ? data.tools : [];
+          const normalized = tools.map((t) => String(t)) as ToolKey[];
+          const set = new Set<ToolKey>(
+            normalized.filter((t) => t in TOOL_CONFIG) as ToolKey[],
+          );
+          if (!cancelled) setAllowedTools(set.size ? set : null);
+        } catch {
+          if (!cancelled) setAllowedTools(null);
+        }
+        return;
+      }
+
+      // Paid plan (plan:<id>)
       if (!planKey || !planKey.startsWith("plan:")) {
         if (!cancelled) setAllowedTools(null);
         return;
@@ -115,15 +257,6 @@ export default function HomeConverter({ activeTool, onSelectTool }: Props) {
   const isToolAllowed = useMemo(() => {
     return (tool: ToolKey) => !allowedTools || allowedTools.has(tool);
   }, [allowedTools]);
-
-  useEffect(() => {
-    if (!allowedTools) return;
-    if (allowedTools.has(activeTool)) return;
-
-    const firstAllowed = (Object.keys(TOOL_CONFIG) as ToolKey[]).find((k) => allowedTools.has(k));
-    if (firstAllowed) switchTool(firstAllowed);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [allowedTools, activeTool]);
 
   const Icon = currentConfig.icon;
 
@@ -173,19 +306,20 @@ export default function HomeConverter({ activeTool, onSelectTool }: Props) {
             {Object.entries(TOOL_CONFIG).map(([key, config]) => {
               const toolKey = key as ToolKey;
               const TabIcon = config.icon;
-              const allowed = isToolAllowed(toolKey);
               return (
                 <button
                   key={toolKey}
-                  onClick={() => (allowed ? switchTool(toolKey) : undefined)}
-                  disabled={!allowed}
-                  title={allowed ? undefined : "Chức năng này không có trong gói của bạn"}
+                  onClick={() => {
+                    switchTool(toolKey);
+                    void (async () => {
+                      const checked = await checkAccess(toolKey);
+                      if (!checked.allowed) openGateModal(checked.reason, checked.detail || undefined);
+                    })();
+                  }}
                   className={`px-5 py-2 rounded-t-lg text-sm font-medium transition-colors flex items-center gap-2 ${
                     activeTool === toolKey
                       ? "bg-white text-slate-800 shadow-sm pt-3"
-                      : allowed
-                        ? "bg-white/10 text-white/70 hover:bg-white/20 backdrop-blur-sm"
-                        : "bg-white/10 text-white/40 backdrop-blur-sm cursor-not-allowed opacity-60"
+                      : "bg-white/10 text-white/70 hover:bg-white/20 backdrop-blur-sm"
                   }`}
                 >
                   <TabIcon size={18} />
@@ -207,15 +341,54 @@ export default function HomeConverter({ activeTool, onSelectTool }: Props) {
                 onDragEnter={converter.handleDrag}
                 onDragLeave={converter.handleDrag}
                 onDragOver={converter.handleDrag}
-                onDrop={converter.handleDrop}
-                onClick={() => converter.fileInputRef.current?.click()}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+
+                  converter.setDragActive(false);
+                  const dropped = e.dataTransfer.files?.[0];
+                  if (!dropped) return;
+
+                  void ensureAllowed(activeTool).then((ok) => {
+                    if (!ok) return;
+                    converter.validateAndSetFile(dropped);
+                  });
+                }}
+                onClick={() => {
+                  void ensureAllowed(activeTool).then((ok) => {
+                    if (!ok) return;
+                    if (!isToolAllowed(activeTool)) {
+                      openGateModal("tool_not_allowed");
+                      return;
+                    }
+                    if (isFileDialogOpeningRef.current) return;
+                    isFileDialogOpeningRef.current = true;
+                    converter.fileInputRef.current?.click();
+                    setTimeout(() => {
+                      isFileDialogOpeningRef.current = false;
+                    }, 600);
+                  });
+                }}
               >
                 <input
                   ref={converter.fileInputRef}
                   type="file"
                   accept={currentConfig.accept}
                   className="hidden"
-                  onChange={converter.handleChange}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  onClick={(e) => e.stopPropagation()}
+                  onChange={(e) => {
+                    isFileDialogOpeningRef.current = false;
+                    const picked = e.target.files?.[0];
+                    if (!picked) return;
+                    void ensureAllowed(activeTool).then((ok) => {
+                      if (!ok) {
+                        if (converter.fileInputRef.current) converter.fileInputRef.current.value = "";
+                        return;
+                      }
+                      converter.validateAndSetFile(picked);
+                    });
+                  }}
                 />
 
                 <div
@@ -256,13 +429,13 @@ export default function HomeConverter({ activeTool, onSelectTool }: Props) {
                       Hủy bỏ
                     </button>
                     <button
-                      onClick={converter.handleConvert}
+                      onClick={() => {
+                        void ensureAllowed(activeTool).then((ok) => {
+                          if (!ok) return;
+                          void converter.handleConvert();
+                        });
+                      }}
                       disabled={!isToolAllowed(activeTool)}
-                      title={
-                        isToolAllowed(activeTool)
-                          ? undefined
-                          : "Chức năng này không có trong gói của bạn"
-                      }
                       className={`flex-1 py-3 text-white font-medium rounded-xl shadow-lg transition-all flex items-center justify-center gap-2 ${primaryButtonClass(
                         activeTool
                       )}`}
@@ -437,6 +610,17 @@ export default function HomeConverter({ activeTool, onSelectTool }: Props) {
           </div>
         </div>
       </div>
+
+      <UpgradePlanNotification
+        isOpen={gateOpen}
+        onClose={closeGateModal}
+        onUpgrade={() => {
+          closeGateModal();
+          router.push("/upgrade");
+        }}
+        title={gateTitle}
+        message={gateMessage}
+      />
     </>
   );
 }

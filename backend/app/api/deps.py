@@ -69,6 +69,23 @@ def get_current_user(
     return user
 
 
+def get_optional_user(
+    credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
+    db: Session = Depends(get_db),
+) -> User | None:
+    """Return current user if authenticated, else None.
+
+    - Missing token => None
+    - Invalid token => 401 (do not silently treat as guest)
+    """
+
+    if credentials is None:
+        return None
+
+    # Delegate to strict validator for invalid tokens.
+    return get_current_user(credentials=credentials, db=db)
+
+
 def require_admin(current_user: User = Depends(get_current_user)) -> User:
     if current_user.role != "admin":
         raise HTTPException(

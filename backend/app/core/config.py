@@ -35,6 +35,11 @@ class Settings:
     max_pages: int = int(os.getenv("PDF_MAX_PAGES", "300"))
     prefer_editable: bool = os.getenv("PREFER_EDITABLE", "true").lower() in ("1", "true", "yes")
 
+    # Free plan gating (server-side source of truth)
+    # Comma-separated tool keys: pdf-word,jpg-png,word-pdf
+    free_plan_tools: str = os.getenv("FREE_PLAN_TOOLS", "pdf-word,jpg-png")
+    free_plan_doc_limit_per_month: int = int(os.getenv("FREE_PLAN_DOC_LIMIT_PER_MONTH", "3"))
+
     # Adobe PDF Services API (PDF -> DOCX)
     # IMPORTANT: keep credentials server-side only.
     adobe_base_url: str = os.getenv("ADOBE_PDF_SERVICES_BASE_URL", "https://pdf-services.adobe.io").rstrip("/")

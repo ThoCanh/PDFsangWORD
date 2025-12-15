@@ -33,6 +33,9 @@ export function useConverter({
   const [conversionMode, setConversionMode] = useState<string | null>(null);
   const [pdfHasText, setPdfHasText] = useState<boolean | null>(null);
   const [dragActive, setDragActive] = useState(false);
+  const [gateBlocked, setGateBlocked] = useState<
+    { status: number; detail?: string } | null
+  >(null);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const dropzoneRef = useRef<HTMLDivElement | null>(null);
@@ -50,6 +53,7 @@ export function useConverter({
     setResultFileName(null);
     setConversionMode(null);
     setPdfHasText(null);
+    setGateBlocked(null);
   }, []);
 
   const triggerDownload = useCallback((blob: Blob, name: string) => {
@@ -203,8 +207,34 @@ export function useConverter({
           if (hasTextHeader === "1") setPdfHasText(true);
           else if (hasTextHeader === "0") setPdfHasText(false);
         } else {
+          const statusCode = this.status;
+          const fallback = `Lỗi Server: ${statusCode} ${this.statusText}`.trim();
+
+          // For plan/quota gating, let the UI show a modal instead of the error panel.
+          if (statusCode === 403 || statusCode === 429) {
+            setStatus("idle");
+            setErrorMessage("");
+
+            const resp = this.response as unknown;
+            if (resp instanceof Blob) {
+              resp
+                .text()
+                .then((t) => {
+                  try {
+                    const parsed = JSON.parse(t) as { detail?: string };
+                    setGateBlocked({ status: statusCode, detail: parsed?.detail || t || fallback });
+                  } catch {
+                    setGateBlocked({ status: statusCode, detail: t || fallback });
+                  }
+                })
+                .catch(() => setGateBlocked({ status: statusCode, detail: fallback }));
+            } else {
+              setGateBlocked({ status: statusCode, detail: fallback });
+            }
+            return;
+          }
+
           setStatus("error");
-          const fallback = `Lỗi Server: ${this.status} ${this.statusText}`.trim();
 
           const resp = this.response as unknown;
           if (resp instanceof Blob) {
@@ -264,5 +294,7 @@ export function useConverter({
     handleChange,
     handleConvert,
     downloadResult,
+    gateBlocked,
+    clearGateBlocked: () => setGateBlocked(null),
   };
 }

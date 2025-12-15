@@ -10,7 +10,7 @@ from sqlalchemy import and_
 from sqlalchemy.orm import Session
 
 from ..deps import get_db
-from ..deps import get_current_user
+from ..deps import get_optional_user
 from ...core.config import settings
 from ...services.image.jpg_to_png import JpgToPngError, convert_jpg_to_png
 from ...services.pdf.libreoffice import LibreOfficeConvertError, LibreOfficeNotFoundError, convert_word_to_pdf
@@ -21,13 +21,156 @@ from ...utils.files import make_work_dir, remove_tree, safe_filename
 router = APIRouter()
 
 
+@router.get("/convert/check")
+def check_convert_access(
+    request: Request,
+    type: str,
+    current_user: User | None = Depends(get_optional_user),
+    db: Session = Depends(get_db),
+):
+    """Pre-check tool access + monthly quota.
+
+    Frontend uses this to decide whether to show an upgrade/limit modal before
+    opening file picker or running conversion.
+    """
+
+    tool_type = type
+    plan: Plan | None = None
+
+    if current_user and current_user.plan_key.startswith("plan:"):
+        try:
+            plan_id = int(current_user.plan_key.split(":", 1)[1])
+        except Exception:
+            return {"allowed": False, "reason": "invalid_plan_key", "detail": "Invalid plan_key"}
+        plan = db.get(Plan, plan_id)
+        if not plan:
+            return {"allowed": False, "reason": "plan_not_found", "detail": "Plan not found"}
+
+    now = datetime.now(timezone.utc)
+    month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+    if plan is not None:
+        # Allowed tools: if empty => backward-compatible allow-all.
+        try:
+            import json
+
+            allowed_tools = json.loads(plan.tools_json) if plan.tools_json else []
+            if not isinstance(allowed_tools, list):
+                allowed_tools = []
+            allowed_tools = [str(x) for x in allowed_tools if str(x).strip()]
+        except Exception:
+            allowed_tools = []
+
+        if allowed_tools and tool_type not in set(allowed_tools):
+            return {
+                "allowed": False,
+                "reason": "tool_not_allowed",
+                "detail": "Chức năng này không có trong gói của bạn",
+            }
+
+        limit = int(plan.doc_limit_per_month or 0)
+        used = (
+            db.query(ConversionJob)
+            .filter(
+                and_(
+                    ConversionJob.user_id == current_user.id,
+                    ConversionJob.created_at >= month_start,
+                    ConversionJob.status != "failed",
+                )
+            )
+            .count()
+        )
+        remaining = max(limit - used, 0)
+        if limit <= 0 or used >= limit:
+            return {
+                "allowed": False,
+                "reason": "quota_exceeded",
+                "detail": "Bạn đã đạt giới hạn tài liệu/tháng" if limit > 0 else "Gói của bạn không có lượt sử dụng trong tháng",
+                "limit": limit,
+                "used": used,
+                "remaining": remaining,
+            }
+
+        return {
+            "allowed": True,
+            "reason": None,
+            "detail": None,
+            "limit": limit,
+            "used": used,
+            "remaining": remaining,
+        }
+
+    # Free plan gating
+    raw = (settings.free_plan_tools or "").strip()
+    free_tools = [x.strip() for x in raw.split(",") if x.strip()]
+    allowed = {"pdf-word", "jpg-png", "word-pdf"}
+    free_tools = [t for t in free_tools if t in allowed]
+
+    if free_tools and tool_type not in set(free_tools):
+        return {
+            "allowed": False,
+            "reason": "tool_not_allowed",
+            "detail": "Chức năng này không có trong gói Free",
+        }
+
+    limit = int(settings.free_plan_doc_limit_per_month or 0)
+    if current_user is not None:
+        used = (
+            db.query(ConversionJob)
+            .filter(
+                and_(
+                    ConversionJob.user_id == current_user.id,
+                    ConversionJob.created_at >= month_start,
+                    ConversionJob.status != "failed",
+                )
+            )
+            .count()
+        )
+    else:
+        client_ip = getattr(getattr(request, "client", None), "host", None)
+        if not client_ip:
+            return {"allowed": False, "reason": "missing_client_ip", "detail": "Missing client IP"}
+        used = (
+            db.query(ConversionJob)
+            .filter(
+                and_(
+                    ConversionJob.user_id.is_(None),
+                    ConversionJob.client_ip == client_ip,
+                    ConversionJob.created_at >= month_start,
+                    ConversionJob.status != "failed",
+                )
+            )
+            .count()
+        )
+
+    remaining = max(limit - used, 0)
+    if limit <= 0 or used >= limit:
+        return {
+            "allowed": False,
+            "reason": "quota_exceeded",
+            "detail": "Bạn đã đạt giới hạn tài liệu/tháng" if limit > 0 else "Gói Free không có lượt sử dụng trong tháng",
+            "limit": limit,
+            "used": used,
+            "remaining": remaining,
+        }
+
+    return {
+        "allowed": True,
+        "reason": None,
+        "detail": None,
+        "limit": limit,
+        "used": used,
+        "remaining": remaining,
+    }
+
+
 @router.post("/convert")
 async def convert(
     background: BackgroundTasks,
     request: Request,
     file: UploadFile = File(...),
     type: str = Form(...),
-    current_user: User = Depends(get_current_user),
+    current_user: User | None = Depends(get_optional_user),
     db: Session = Depends(get_db),
 ):
     if not file.filename:
@@ -36,7 +179,7 @@ async def convert(
     # Enforce plan tool access + monthly quota.
     tool_type = type
     plan: Plan | None = None
-    if current_user.plan_key.startswith("plan:"):
+    if current_user and current_user.plan_key.startswith("plan:"):
         try:
             plan_id = int(current_user.plan_key.split(":", 1)[1])
         except Exception:
@@ -80,6 +223,53 @@ async def convert(
         if used >= limit:
             raise HTTPException(status_code=429, detail="Bạn đã đạt giới hạn tài liệu/tháng")
 
+    if plan is None:
+        # Free plan gating
+        raw = (settings.free_plan_tools or "").strip()
+        free_tools = [x.strip() for x in raw.split(",") if x.strip()]
+        allowed = {"pdf-word", "jpg-png", "word-pdf"}
+        free_tools = [t for t in free_tools if t in allowed]
+
+        if free_tools and tool_type not in set(free_tools):
+            raise HTTPException(status_code=403, detail="Chức năng này không có trong gói Free")
+
+        limit = int(settings.free_plan_doc_limit_per_month or 0)
+        if limit <= 0:
+            raise HTTPException(status_code=429, detail="Gói Free không có lượt sử dụng trong tháng")
+
+        now = datetime.now(timezone.utc)
+        month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        if current_user is not None:
+            used = (
+                db.query(ConversionJob)
+                .filter(
+                    and_(
+                        ConversionJob.user_id == current_user.id,
+                        ConversionJob.created_at >= month_start,
+                        ConversionJob.status != "failed",
+                    )
+                )
+                .count()
+            )
+        else:
+            client_ip = getattr(getattr(request, "client", None), "host", None)
+            if not client_ip:
+                raise HTTPException(status_code=400, detail="Missing client IP")
+            used = (
+                db.query(ConversionJob)
+                .filter(
+                    and_(
+                        ConversionJob.user_id.is_(None),
+                        ConversionJob.client_ip == client_ip,
+                        ConversionJob.created_at >= month_start,
+                        ConversionJob.status != "failed",
+                    )
+                )
+                .count()
+            )
+        if used >= limit:
+            raise HTTPException(status_code=429, detail="Bạn đã đạt giới hạn tài liệu/tháng")
+
     if type == "pdf-word":
         filename = file.filename
         if not filename.lower().endswith(".pdf"):
@@ -87,7 +277,7 @@ async def convert(
 
         job = ConversionJob(
             tool_type=type,
-            user_id=current_user.id,
+            user_id=(current_user.id if current_user else None),
             filename=filename,
             client_ip=getattr(getattr(request, "client", None), "host", None),
             status="processing",
@@ -196,7 +386,7 @@ async def convert(
 
         job = ConversionJob(
             tool_type=type,
-            user_id=current_user.id,
+            user_id=(current_user.id if current_user else None),
             filename=filename,
             client_ip=getattr(getattr(request, "client", None), "host", None),
             status="processing",
@@ -292,7 +482,7 @@ async def convert(
 
         job = ConversionJob(
             tool_type=type,
-            user_id=current_user.id,
+            user_id=(current_user.id if current_user else None),
             filename=filename,
             client_ip=getattr(getattr(request, "client", None), "host", None),
             status="processing",
