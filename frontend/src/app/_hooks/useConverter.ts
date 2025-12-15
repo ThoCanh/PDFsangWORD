@@ -193,8 +193,6 @@ export function useConverter({
           const hasTextHeader = xhr.getResponseHeader("X-PDF-Has-Text");
           if (hasTextHeader === "1") setPdfHasText(true);
           else if (hasTextHeader === "0") setPdfHasText(false);
-
-          triggerDownload(blob, outName);
         } else {
           setStatus("error");
           const fallback = `Lỗi Server: ${this.status} ${this.statusText}`.trim();
