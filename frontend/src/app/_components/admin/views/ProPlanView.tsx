@@ -1,27 +1,132 @@
 "use client";
 
 import React from "react";
-import { CreditCard, PackagePlus, Search } from "lucide-react";
-import { PRO_USERS_DATA } from "../_data/mock";
-import { StatusBadge } from "../_ui/Badges";
+import { CreditCard, Edit2, Eye, PackagePlus, Search, Trash2, X } from "lucide-react";
+
+import { BACKEND_URL } from "../../../_config/app";
+import { getAccessToken } from "../../auth/token";
+import AddPlanModal from "../modals/AddPlanModal";
 
 type Props = {
   onAddPlan: () => void;
   onAssignPackage: () => void;
+  reloadToken?: number;
 };
 
-export default function ProPlanView({ onAddPlan, onAssignPackage }: Props) {
+type Plan = {
+  id: number;
+  created_at: string;
+  name: string;
+  price_vnd: number;
+  billing_cycle: "month" | "year" | "lifetime" | string;
+  doc_limit_per_month: number;
+  features: string[];
+  tools: string[];
+  notes: string | null;
+};
+
+function formatPriceVnd(value: number) {
+  try {
+    return new Intl.NumberFormat("vi-VN").format(value) + "đ";
+  } catch {
+    return String(value) + "đ";
+  }
+}
+
+function formatCycle(cycle: string) {
+  const c = (cycle || "").toLowerCase();
+  if (c === "month") return "Tháng";
+  if (c === "year") return "Năm";
+  if (c === "lifetime") return "Vĩnh viễn";
+  return cycle;
+}
+
+export default function ProPlanView({ onAddPlan, onAssignPackage, reloadToken }: Props) {
   const [search, setSearch] = React.useState("");
+  const [loading, setLoading] = React.useState(true);
+  const [error, setError] = React.useState<string | null>(null);
+  const [plans, setPlans] = React.useState<Plan[]>([]);
+  const [viewing, setViewing] = React.useState<Plan | null>(null);
+  const [editing, setEditing] = React.useState<Plan | null>(null);
+  const [refreshKey, setRefreshKey] = React.useState(0);
+
+  const deletePlan = React.useCallback(async (plan: Plan) => {
+    const ok =
+      typeof window !== "undefined"
+        ? window.confirm(`Xóa gói "${plan.name}" (ID: ${plan.id})?`)
+        : false;
+    if (!ok) return;
+
+    try {
+      const token = getAccessToken();
+      const res = await fetch(`${BACKEND_URL}/admin/plans/${plan.id}`, {
+        method: "DELETE",
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      });
+
+      if (res.status === 401) {
+        setError("Chưa đăng nhập (401). Hãy login để lấy access_token.");
+        return;
+      }
+      if (res.status === 403) {
+        setError("Không đủ quyền (403). Tài khoản phải có role=admin.");
+        return;
+      }
+      if (!res.ok) {
+        const msg = await res.text().catch(() => "");
+        setError(msg || `Xóa gói thất bại (${res.status}).`);
+        return;
+      }
+
+      setRefreshKey((v) => v + 1);
+    } catch {
+      setError("Không thể kết nối backend.");
+    }
+  }, []);
+
+  React.useEffect(() => {
+    let cancelled = false;
+
+    async function load() {
+      setLoading(true);
+      setError(null);
+      try {
+        const token = getAccessToken();
+        const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
+        const res = await fetch(`${BACKEND_URL}/admin/plans`, { headers });
+        if (res.status === 401) {
+          throw new Error("Chưa đăng nhập (401). Hãy login để lấy access_token.");
+        }
+        if (res.status === 403) {
+          throw new Error("Không đủ quyền (403). Tài khoản phải có role=admin.");
+        }
+        if (!res.ok) {
+          throw new Error(`Lỗi tải danh sách gói (${res.status}).`);
+        }
+
+        const data = (await res.json()) as Plan[];
+        if (!cancelled) setPlans(Array.isArray(data) ? data : []);
+      } catch (e: unknown) {
+        if (!cancelled) setError(e instanceof Error ? e.message : "Không thể tải dữ liệu");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, [reloadToken, refreshKey]);
 
   const filtered = React.useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return PRO_USERS_DATA;
-    return PRO_USERS_DATA.filter((u) =>
-      [u.id, u.name, u.email, u.plan, u.status].some((v) =>
-        String(v).toLowerCase().includes(q),
-      ),
+    if (!q) return plans;
+    return plans.filter((p) =>
+      [p.id, p.name, p.billing_cycle, p.price_vnd, p.doc_limit_per_month]
+        .some((v) => String(v).toLowerCase().includes(q)),
     );
-  }, [search]);
+  }, [search, plans]);
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -70,72 +175,105 @@ export default function ProPlanView({ onAddPlan, onAssignPackage }: Props) {
             <thead className="bg-slate-50">
               <tr>
                 <th className="p-4 text-xs font-semibold text-slate-500 uppercase">
-                  Khách hàng
+                  Tên gói
                 </th>
                 <th className="p-4 text-xs font-semibold text-slate-500 uppercase">
-                  Gói
+                  Giá
                 </th>
                 <th className="p-4 text-xs font-semibold text-slate-500 uppercase">
-                  Trạng thái
+                  Chu kỳ
                 </th>
                 <th className="p-4 text-xs font-semibold text-slate-500 uppercase">
-                  Gia hạn
+                  Giới hạn
                 </th>
                 <th className="p-4 text-xs font-semibold text-slate-500 uppercase">
-                  Mức sử dụng
+                  Tính năng
+                </th>
+                <th className="p-4 text-xs font-semibold text-slate-500 uppercase">
+                  Hoạt động
                 </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {filtered.map((u) => (
-                <tr key={u.id} className="hover:bg-slate-50 transition-colors">
+              {filtered.map((p) => (
+                <tr key={p.id} className="hover:bg-slate-50 transition-colors">
                   <td className="p-4">
-                    <div className="text-sm font-semibold text-slate-800">
-                      {u.name}
-                    </div>
-                    <div className="text-xs text-slate-500 mt-1">
-                      {u.email} • {u.id}
-                    </div>
+                    <div className="text-sm font-semibold text-slate-800">{p.name}</div>
+                    <div className="text-xs text-slate-500 mt-1">ID: {p.id}</div>
                   </td>
                   <td className="p-4">
                     <div className="text-sm text-slate-700 font-medium">
-                      {u.plan}
+                      {formatPriceVnd(p.price_vnd)}
                     </div>
-                    <div className="text-xs text-slate-500 mt-1">{u.price}</div>
+                  </td>
+                  <td className="p-4 text-sm text-slate-600">{formatCycle(p.billing_cycle)}</td>
+                  <td className="p-4 text-sm text-slate-600">
+                    {p.doc_limit_per_month}/tháng
                   </td>
                   <td className="p-4">
-                    <StatusBadge status={u.status} />
+                    <div className="text-sm text-slate-700">
+                      {Array.isArray(p.features) ? p.features.length : 0} tính năng
+                    </div>
+                    {p.notes ? (
+                      <div className="text-xs text-slate-500 mt-1 line-clamp-1">
+                        {p.notes}
+                      </div>
+                    ) : null}
                   </td>
-                  <td className="p-4 text-sm text-slate-600">{u.renewal}</td>
                   <td className="p-4">
-                    <div className="flex items-center gap-3">
-                      <div className="w-28 bg-slate-200 rounded-full h-2">
-                        <div
-                          className={`h-2 rounded-full ${
-                            u.usage > 90
-                              ? "bg-red-500"
-                              : u.usage > 70
-                                ? "bg-yellow-500"
-                                : "bg-green-500"
-                          }`}
-                          style={{ width: `${u.usage}%` }}
-                        />
-                      </div>
-                      <div className="text-xs text-slate-500 font-medium">
-                        {u.usage}%
-                      </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setViewing(p)}
+                        className="p-2 rounded-lg hover:bg-slate-100 text-slate-600"
+                        aria-label="Xem chi tiết"
+                      >
+                        <Eye size={16} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setEditing(p)}
+                        className="p-2 rounded-lg hover:bg-slate-100 text-slate-600"
+                        aria-label="Chỉnh sửa"
+                      >
+                        <Edit2 size={16} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void deletePlan(p)}
+                        className="p-2 rounded-lg hover:bg-rose-50 text-rose-600"
+                        aria-label="Xóa"
+                      >
+                        <Trash2 size={16} />
+                      </button>
                     </div>
                   </td>
                 </tr>
               ))}
 
-              {filtered.length === 0 && (
+              {loading && (
+                <tr>
+                  <td colSpan={6} className="p-10 text-center text-sm text-slate-500">
+                    Đang tải danh sách gói…
+                  </td>
+                </tr>
+              )}
+
+              {!loading && error && (
+                <tr>
+                  <td colSpan={6} className="p-10 text-center text-sm text-rose-600">
+                    {error}
+                  </td>
+                </tr>
+              )}
+
+              {!loading && !error && filtered.length === 0 && (
                 <tr>
                   <td
-                    colSpan={5}
+                    colSpan={6}
                     className="p-10 text-center text-sm text-slate-500"
                   >
-                    Không có khách hàng phù hợp.
+                    Chưa có gói nào.
                   </td>
                 </tr>
               )}
@@ -143,6 +281,83 @@ export default function ProPlanView({ onAddPlan, onAssignPackage }: Props) {
           </table>
         </div>
       </div>
+
+      {viewing ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh]">
+            <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+              <h3 className="font-bold text-lg text-slate-800">Chi tiết gói</h3>
+              <button
+                onClick={() => setViewing(null)}
+                className="text-slate-400 hover:text-slate-600 transition-colors"
+                aria-label="Close"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-3 overflow-y-auto">
+              <div>
+                <div className="text-xs text-slate-500">Tên gói</div>
+                <div className="text-sm font-semibold text-slate-800">{viewing.name}</div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <div className="text-xs text-slate-500">Giá</div>
+                  <div className="text-sm text-slate-700">{formatPriceVnd(viewing.price_vnd)}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-slate-500">Chu kỳ</div>
+                  <div className="text-sm text-slate-700">{formatCycle(viewing.billing_cycle)}</div>
+                </div>
+              </div>
+              <div>
+                <div className="text-xs text-slate-500">Giới hạn</div>
+                <div className="text-sm text-slate-700">{viewing.doc_limit_per_month}/tháng</div>
+              </div>
+              {viewing.notes ? (
+                <div>
+                  <div className="text-xs text-slate-500">Ghi chú</div>
+                  <div className="text-sm text-slate-700 whitespace-pre-wrap">{viewing.notes}</div>
+                </div>
+              ) : null}
+              <div>
+                <div className="text-xs text-slate-500 mb-2">Tính năng</div>
+                <div className="bg-slate-50 border border-slate-200 rounded-lg p-4">
+                  {Array.isArray(viewing.features) && viewing.features.length ? (
+                    <ul className="list-disc pl-5 space-y-1 text-sm text-slate-700">
+                      {viewing.features.map((f) => (
+                        <li key={f}>{f}</li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <div className="text-sm text-slate-500">Không có</div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="px-6 py-4 bg-slate-50 border-t border-slate-100 flex justify-end">
+              <button
+                onClick={() => setViewing(null)}
+                className="px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-100 transition-colors"
+              >
+                Đóng
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      <AddPlanModal
+        isOpen={!!editing}
+        initialPlan={editing}
+        onClose={() => setEditing(null)}
+        onSave={() => {
+          setEditing(null);
+          setRefreshKey((v) => v + 1);
+        }}
+      />
     </div>
   );
 }

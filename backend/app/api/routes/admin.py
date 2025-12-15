@@ -15,7 +15,12 @@ from ...db.models import ConversionJob, Plan, User
 from ...utils.files import which
 
 
-router = APIRouter(prefix="/admin", tags=["admin"])
+# Protect the entire admin router by default.
+router = APIRouter(
+    prefix="/admin",
+    tags=["admin"],
+    dependencies=[Depends(require_admin)],
+)
 
 
 class PlanCreateRequest(BaseModel):
@@ -24,6 +29,7 @@ class PlanCreateRequest(BaseModel):
     billing_cycle: str = "month"  # month|year|lifetime
     doc_limit_per_month: int = 1000
     features: list[str] = []
+    tools: list[str] = []
     notes: str | None = None
 
 
@@ -35,11 +41,12 @@ class PlanResponse(BaseModel):
     billing_cycle: str
     doc_limit_per_month: int
     features: list[str]
+    tools: list[str]
     notes: str | None
 
 
 @router.get("/plans", response_model=list[PlanResponse])
-def list_plans(db: Session = Depends(get_db), _: User = Depends(require_admin)):
+def list_plans(db: Session = Depends(get_db)):
     plans = db.query(Plan).order_by(Plan.created_at.desc(), Plan.id.desc()).all()
     out: list[PlanResponse] = []
     for p in plans:
@@ -53,6 +60,16 @@ def list_plans(db: Session = Depends(get_db), _: User = Depends(require_admin)):
         except Exception:
             features = []
 
+        try:
+            import json
+
+            tools = json.loads(p.tools_json) if getattr(p, "tools_json", None) else []
+            if not isinstance(tools, list):
+                tools = []
+            tools = [str(x) for x in tools]
+        except Exception:
+            tools = []
+
         out.append(
             PlanResponse(
                 id=p.id,
@@ -62,6 +79,7 @@ def list_plans(db: Session = Depends(get_db), _: User = Depends(require_admin)):
                 billing_cycle=p.billing_cycle,
                 doc_limit_per_month=p.doc_limit_per_month,
                 features=features,
+                tools=tools,
                 notes=p.notes,
             )
         )
@@ -72,7 +90,6 @@ def list_plans(db: Session = Depends(get_db), _: User = Depends(require_admin)):
 def create_plan(
     body: PlanCreateRequest,
     db: Session = Depends(get_db),
-    _: User = Depends(require_admin),
 ):
     name = body.name.strip()
     if not name:
@@ -95,12 +112,19 @@ def create_plan(
 
     features = [str(x).strip() for x in (body.features or []) if str(x).strip()]
 
+    allowed_tools = {"pdf-word", "jpg-png", "word-pdf"}
+    tools = [str(x).strip() for x in (body.tools or []) if str(x).strip()]
+    bad_tools = [t for t in tools if t not in allowed_tools]
+    if bad_tools:
+        raise HTTPException(status_code=422, detail=f"Invalid tools: {', '.join(bad_tools)}")
+
     plan = Plan(
         name=name,
         price_vnd=int(body.price_vnd),
         billing_cycle=cycle,
         doc_limit_per_month=int(body.doc_limit_per_month),
         features_json=json.dumps(features, ensure_ascii=False),
+        tools_json=json.dumps(tools, ensure_ascii=False),
         notes=body.notes.strip() if body.notes else None,
     )
     db.add(plan)
@@ -115,24 +139,99 @@ def create_plan(
         billing_cycle=plan.billing_cycle,
         doc_limit_per_month=plan.doc_limit_per_month,
         features=features,
+        tools=tools,
         notes=plan.notes,
     )
 
 
+@router.put("/plans/{plan_id}", response_model=PlanResponse)
+def update_plan(
+    plan_id: int,
+    body: PlanCreateRequest,
+    db: Session = Depends(get_db),
+):
+    plan = db.get(Plan, plan_id)
+    if not plan:
+        raise HTTPException(status_code=404, detail="plan not found")
+
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="name is required")
+
+    cycle = body.billing_cycle.strip().lower()
+    if cycle not in {"month", "year", "lifetime"}:
+        raise HTTPException(status_code=422, detail="billing_cycle must be month|year|lifetime")
+
+    if body.price_vnd < 0:
+        raise HTTPException(status_code=422, detail="price_vnd must be >= 0")
+    if body.doc_limit_per_month < 0:
+        raise HTTPException(status_code=422, detail="doc_limit_per_month must be >= 0")
+
+    if name != plan.name:
+        exists = db.query(Plan).filter(Plan.name == name).first()
+        if exists:
+            raise HTTPException(status_code=409, detail="plan name already exists")
+
+    import json
+
+    features = [str(x).strip() for x in (body.features or []) if str(x).strip()]
+
+    allowed_tools = {"pdf-word", "jpg-png", "word-pdf"}
+    tools = [str(x).strip() for x in (body.tools or []) if str(x).strip()]
+    bad_tools = [t for t in tools if t not in allowed_tools]
+    if bad_tools:
+        raise HTTPException(status_code=422, detail=f"Invalid tools: {', '.join(bad_tools)}")
+
+    plan.name = name
+    plan.price_vnd = int(body.price_vnd)
+    plan.billing_cycle = cycle
+    plan.doc_limit_per_month = int(body.doc_limit_per_month)
+    plan.features_json = json.dumps(features, ensure_ascii=False)
+    plan.tools_json = json.dumps(tools, ensure_ascii=False)
+    plan.notes = body.notes.strip() if body.notes else None
+
+    db.add(plan)
+    db.commit()
+    db.refresh(plan)
+
+    return PlanResponse(
+        id=plan.id,
+        created_at=plan.created_at,
+        name=plan.name,
+        price_vnd=plan.price_vnd,
+        billing_cycle=plan.billing_cycle,
+        doc_limit_per_month=plan.doc_limit_per_month,
+        features=features,
+        tools=tools,
+        notes=plan.notes,
+    )
+
+
+@router.delete("/plans/{plan_id}")
+def delete_plan(plan_id: int, db: Session = Depends(get_db)):
+    plan = db.get(Plan, plan_id)
+    if not plan:
+        raise HTTPException(status_code=404, detail="plan not found")
+
+    db.delete(plan)
+    db.commit()
+    return {"ok": True}
+
+
 @router.get("/ping")
-def admin_ping(_: User = Depends(require_admin)):
+def admin_ping():
     return {"ok": True}
 
 
 class AdminUserResponse(BaseModel):
     id: int
-    email: EmailStr
+    email: str
     role: str
     created_at: datetime
 
 
 @router.get("/users", response_model=list[AdminUserResponse])
-def list_users(db: Session = Depends(get_db), _: User = Depends(require_admin)):
+def list_users(db: Session = Depends(get_db)):
     users = db.query(User).order_by(User.created_at.desc(), User.id.desc()).all()
     return [
         AdminUserResponse(
@@ -162,7 +261,7 @@ class SystemMetricsResponse(BaseModel):
 
 
 @router.get("/system/metrics", response_model=SystemMetricsResponse)
-def system_metrics(_: User = Depends(require_admin)):
+def system_metrics():
     try:
         import psutil  # type: ignore
     except Exception as e:  # noqa: BLE001
@@ -184,7 +283,7 @@ def system_metrics(_: User = Depends(require_admin)):
 
 
 @router.get("/system/status", response_model=SystemStatusResponse)
-def system_status(request: Request, db: Session = Depends(get_db), _: User = Depends(require_admin)):
+def system_status(request: Request, db: Session = Depends(get_db)):
     # DB
     db_ok = True
     try:
@@ -235,7 +334,7 @@ class SystemLogItemResponse(BaseModel):
 
 
 @router.get("/system/logs", response_model=list[SystemLogItemResponse])
-def system_logs(limit: int = 200, _: User = Depends(require_admin)):
+def system_logs(limit: int = 200):
     items = get_log_items(limit=limit)
     return [
         SystemLogItemResponse(
@@ -276,7 +375,7 @@ def _pp_change(current_rate: float, previous_rate: float) -> str:
 
 
 @router.get("/stats", response_model=AdminStatsResponse)
-def admin_stats(db: Session = Depends(get_db), _: User = Depends(require_admin)):
+def admin_stats(db: Session = Depends(get_db)):
     now = datetime.now(timezone.utc)
     d30 = now - timedelta(days=30)
     d60 = now - timedelta(days=60)

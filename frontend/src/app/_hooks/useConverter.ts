@@ -2,6 +2,7 @@
 
 import { useCallback, useMemo, useRef, useState } from "react";
 import type { ToolConfig, ToolKey } from "../_config/tools";
+import { getAccessToken } from "../_components/auth/token";
 
 export type ConvertStatus =
   | "idle"
@@ -163,6 +164,13 @@ export function useConverter({
     }
 
     try {
+      const token = getAccessToken();
+      if (!token) {
+        setStatus("error");
+        setErrorMessage("Bạn cần đăng nhập để sử dụng chức năng này.");
+        return;
+      }
+
       const formData = new FormData();
       formData.append("file", file);
       formData.append("type", activeTool);
@@ -170,6 +178,7 @@ export function useConverter({
       const xhr = new XMLHttpRequest();
       xhr.open("POST", apiUrl, true);
       xhr.responseType = "blob";
+      xhr.setRequestHeader("Authorization", `Bearer ${token}`);
 
       xhr.upload.onprogress = (event) => {
         if (event.lengthComputable) {

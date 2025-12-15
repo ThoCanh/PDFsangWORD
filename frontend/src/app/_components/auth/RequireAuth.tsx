@@ -47,7 +47,7 @@ export default function RequireAuth({ allow, children }: Props) {
           if (me.role === "admin") {
             router.replace("/admin");
           } else {
-            router.replace("/dashboard");
+            router.replace("/");
           }
           return;
         }

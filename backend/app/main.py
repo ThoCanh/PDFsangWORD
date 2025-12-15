@@ -9,6 +9,7 @@ from .db.base import Base
 from .db.session import engine
 from .db import models as _models  # noqa: F401
 from .core.log_buffer import install_log_buffer
+from sqlalchemy import inspect, text
 
 # CHÚ Ý: Biến này BẮT BUỘC phải tên là 'app' (vì lệnh chạy là :app)
 app = FastAPI(title=settings.app_name)
@@ -38,6 +39,31 @@ def _init_db() -> None:
     install_log_buffer()
     app.state.started_at = datetime.now(timezone.utc)
     Base.metadata.create_all(bind=engine)
+
+    # Lightweight migration (no Alembic in this project).
+    # Ensure new columns exist for existing databases.
+    try:
+        inspector = inspect(engine)
+        existing_cols = {c.get("name") for c in inspector.get_columns("users")}
+        if "plan_key" not in existing_cols:
+            with engine.begin() as conn:
+                conn.execute(
+                    text("ALTER TABLE users ADD COLUMN plan_key VARCHAR(64) NOT NULL DEFAULT 'free'")
+                )
+
+        plan_cols = {c.get("name") for c in inspector.get_columns("plans")}
+        if "tools_json" not in plan_cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE plans ADD COLUMN tools_json TEXT NOT NULL DEFAULT '[]'"))
+
+        job_cols = {c.get("name") for c in inspector.get_columns("conversion_jobs")}
+        if "user_id" not in job_cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE conversion_jobs ADD COLUMN user_id INTEGER"))
+    except Exception:
+        # If migration fails, do not block server startup.
+        # (Admin/user flows will surface issues in logs.)
+        pass
 
 
 @app.get("/")

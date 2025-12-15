@@ -10,6 +10,9 @@ import AuthPage from "../pages/AuthPage";
 import HomePage from "../pages/HomePage";
 import PricingPage from "../pages/PricingPage";
 import ToolsPage from "../pages/ToolsPage";
+import { useAuth } from "../auth/AuthContext";
+import { BACKEND_URL } from "../../_config/app";
+import { getAccessToken } from "../auth/token";
 
 export default function MainApp() {
   const [view, setView] = useState<ViewKey>("home");
@@ -18,6 +21,7 @@ export default function MainApp() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const pathname = usePathname();
   const router = useRouter();
+  const auth = useAuth();
 
   const navigateTo = (page: ViewKey) => {
     setView(page);
@@ -87,7 +91,27 @@ export default function MainApp() {
         <PricingPage
           selectedPlan={selectedPlan}
           onSelectPlan={(plan) => setSelectedPlan(plan)}
-          onStartFree={() => navigateTo("home")}
+          onStartFree={async () => {
+            const token = getAccessToken();
+            if (!token) {
+              router.push("/register");
+              return;
+            }
+
+            try {
+              const res = await fetch(`${BACKEND_URL}/auth/me/plan`, {
+                method: "PUT",
+                headers: {
+                  "Content-Type": "application/json",
+                  Authorization: `Bearer ${token}`,
+                },
+                body: JSON.stringify({ plan_key: "free" }),
+              });
+              if (res.ok) auth.refresh();
+            } catch {
+              // ignore
+            }
+          }}
         />
       )}
 

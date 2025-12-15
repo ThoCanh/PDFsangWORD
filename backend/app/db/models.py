@@ -16,6 +16,10 @@ class User(Base):
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     role: Mapped[str] = mapped_column(String(32), nullable=False, default="user")
 
+    # Current plan key for the user. Keep it simple and stable for the frontend.
+    # Examples: "free", "plan:12".
+    plan_key: Mapped[str] = mapped_column(String(64), nullable=False, default="free")
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
@@ -35,6 +39,7 @@ class ConversionJob(Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     tool_type: Mapped[str] = mapped_column(String(32), index=True, nullable=False)
+    user_id: Mapped[int | None] = mapped_column(Integer, index=True, nullable=True)
     filename: Mapped[str | None] = mapped_column(String(512), nullable=True)
     client_ip: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
@@ -64,4 +69,5 @@ class Plan(Base):
 
     # Stored as JSON text for simplicity.
     features_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    tools_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)

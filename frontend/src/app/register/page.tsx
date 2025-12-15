@@ -12,7 +12,7 @@ export default function Page() {
       }}
       onAuthSuccess={(role) => {
         // Admin is handled inside AuthPage (opens new tab + keeps this tab logged out)
-        if (role === "user") router.push("/dashboard");
+        if (role === "user") router.push("/");
         else router.push("/");
       }}
     />

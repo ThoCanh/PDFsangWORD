@@ -9,6 +9,6 @@ export type ConvertStatus =
   | "success"
   | "error";
 
-export type SelectedPlan = "basic" | "pro" | null;
+export type SelectedPlan = string | null;
 
 export type ActiveTool = ToolKey;

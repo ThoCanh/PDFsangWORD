@@ -59,8 +59,10 @@ export default function AdminDashboard() {
 
   const [isAddUserOpen, setIsAddUserOpen] = React.useState(false);
   const [editingUser, setEditingUser] = React.useState<UserRow | null>(null);
+  const [usersReloadToken, setUsersReloadToken] = React.useState(0);
   const [isAddPlanOpen, setIsAddPlanOpen] = React.useState(false);
   const [isAssignPackageOpen, setIsAssignPackageOpen] = React.useState(false);
+  const [plansReloadToken, setPlansReloadToken] = React.useState(0);
 
   const navItems: Array<{ key: ViewKey; label: string; icon: LucideIcon }> = [
     { key: "dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -184,6 +186,7 @@ export default function AdminDashboard() {
                 setEditingUser(u);
                 setIsAddUserOpen(true);
               }}
+              reloadToken={usersReloadToken}
             />
           )}
 
@@ -191,6 +194,7 @@ export default function AdminDashboard() {
             <ProPlanView
               onAddPlan={() => setIsAddPlanOpen(true)}
               onAssignPackage={() => setIsAssignPackageOpen(true)}
+              reloadToken={plansReloadToken}
             />
           )}
 
@@ -205,7 +209,7 @@ export default function AdminDashboard() {
         isOpen={isAddUserOpen}
         onClose={() => setIsAddUserOpen(false)}
         onSave={() => {
-          // demo UI only
+          setUsersReloadToken((v) => v + 1);
         }}
         initialData={
           editingUser
@@ -223,7 +227,7 @@ export default function AdminDashboard() {
         isOpen={isAddPlanOpen}
         onClose={() => setIsAddPlanOpen(false)}
         onSave={() => {
-          // demo UI only
+          setPlansReloadToken((v) => v + 1);
         }}
       />
 

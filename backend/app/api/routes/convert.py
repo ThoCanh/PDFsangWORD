@@ -6,13 +6,16 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
+from sqlalchemy import and_
 from sqlalchemy.orm import Session
 
 from ..deps import get_db
+from ..deps import get_current_user
 from ...core.config import settings
 from ...services.image.jpg_to_png import JpgToPngError, convert_jpg_to_png
+from ...services.pdf.libreoffice import LibreOfficeConvertError, LibreOfficeNotFoundError, convert_word_to_pdf
 from ...services.pdf.pipeline import EditableConversionUnavailable, convert_pdf_to_docx_pipeline
-from ...db.models import ConversionJob
+from ...db.models import ConversionJob, Plan, User
 from ...utils.files import make_work_dir, remove_tree, safe_filename
 
 router = APIRouter()
@@ -24,10 +27,58 @@ async def convert(
     request: Request,
     file: UploadFile = File(...),
     type: str = Form(...),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     if not file.filename:
         raise HTTPException(status_code=400, detail="Missing filename")
+
+    # Enforce plan tool access + monthly quota.
+    tool_type = type
+    plan: Plan | None = None
+    if current_user.plan_key.startswith("plan:"):
+        try:
+            plan_id = int(current_user.plan_key.split(":", 1)[1])
+        except Exception:
+            raise HTTPException(status_code=422, detail="Invalid plan_key")
+        plan = db.get(Plan, plan_id)
+        if not plan:
+            raise HTTPException(status_code=404, detail="Plan not found")
+
+    if plan is not None:
+        # Allowed tools: if empty => backward-compatible allow-all.
+        try:
+            import json
+
+            allowed_tools = json.loads(plan.tools_json) if plan.tools_json else []
+            if not isinstance(allowed_tools, list):
+                allowed_tools = []
+            allowed_tools = [str(x) for x in allowed_tools if str(x).strip()]
+        except Exception:
+            allowed_tools = []
+
+        if allowed_tools and tool_type not in set(allowed_tools):
+            raise HTTPException(status_code=403, detail="Chức năng này không có trong gói của bạn")
+
+        limit = int(plan.doc_limit_per_month or 0)
+        if limit <= 0:
+            raise HTTPException(status_code=429, detail="Gói của bạn không có lượt sử dụng trong tháng")
+
+        now = datetime.now(timezone.utc)
+        month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        used = (
+            db.query(ConversionJob)
+            .filter(
+                and_(
+                    ConversionJob.user_id == current_user.id,
+                    ConversionJob.created_at >= month_start,
+                    ConversionJob.status != "failed",
+                )
+            )
+            .count()
+        )
+        if used >= limit:
+            raise HTTPException(status_code=429, detail="Bạn đã đạt giới hạn tài liệu/tháng")
 
     if type == "pdf-word":
         filename = file.filename
@@ -36,6 +87,7 @@ async def convert(
 
         job = ConversionJob(
             tool_type=type,
+            user_id=current_user.id,
             filename=filename,
             client_ip=getattr(getattr(request, "client", None), "host", None),
             status="processing",
@@ -144,6 +196,7 @@ async def convert(
 
         job = ConversionJob(
             tool_type=type,
+            user_id=current_user.id,
             filename=filename,
             client_ip=getattr(getattr(request, "client", None), "host", None),
             status="processing",
@@ -225,6 +278,120 @@ async def convert(
             filename=out_name,
             headers={
                 "X-Conversion-Mode": "pillow",
+            },
+        )
+
+    if type == "word-pdf":
+        filename = file.filename
+        lower = filename.lower()
+        if not (lower.endswith(".doc") or lower.endswith(".docx")):
+            raise HTTPException(status_code=400, detail="Only .doc/.docx is supported for word-pdf")
+
+        if not settings.libreoffice_path:
+            raise HTTPException(status_code=503, detail="LibreOffice is not configured on the server")
+
+        job = ConversionJob(
+            tool_type=type,
+            user_id=current_user.id,
+            filename=filename,
+            client_ip=getattr(getattr(request, "client", None), "host", None),
+            status="processing",
+        )
+        db.add(job)
+        db.commit()
+        db.refresh(job)
+
+        t0 = time.perf_counter()
+        work_dir = make_work_dir("docuflow-convert")
+        background.add_task(remove_tree, work_dir)
+
+        in_word = Path(work_dir) / ("input.docx" if lower.endswith(".docx") else "input.doc")
+
+        max_bytes = settings.max_upload_mb * 1024 * 1024
+        size = 0
+        try:
+            with in_word.open("wb") as f:
+                while True:
+                    chunk = await file.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    size += len(chunk)
+                    if size > max_bytes:
+                        raise HTTPException(
+                            status_code=413,
+                            detail=f"File too large. Max {settings.max_upload_mb}MB",
+                        )
+                    f.write(chunk)
+        finally:
+            await file.close()
+
+        try:
+            job.size_bytes = size
+            db.add(job)
+            db.commit()
+        except Exception:
+            db.rollback()
+
+        try:
+            out_dir = Path(work_dir) / "pdf"
+            result_pdf = convert_word_to_pdf(
+                word_path=in_word,
+                out_dir=out_dir,
+                soffice_path=settings.libreoffice_path,
+                timeout_sec=settings.conversion_timeout_sec,
+                user_install_dir=Path(work_dir) / "lo-profile",
+            )
+        except LibreOfficeNotFoundError as e:
+            try:
+                job.status = "failed"
+                job.error = str(e)
+                job.finished_at = datetime.now(timezone.utc)
+                job.duration_ms = int((time.perf_counter() - t0) * 1000)
+                db.add(job)
+                db.commit()
+            except Exception:
+                db.rollback()
+            raise HTTPException(status_code=503, detail=str(e)) from e
+        except LibreOfficeConvertError as e:
+            try:
+                job.status = "failed"
+                job.error = str(e)
+                job.finished_at = datetime.now(timezone.utc)
+                job.duration_ms = int((time.perf_counter() - t0) * 1000)
+                db.add(job)
+                db.commit()
+            except Exception:
+                db.rollback()
+            raise HTTPException(status_code=422, detail=str(e)) from e
+        except Exception as e:  # noqa: BLE001
+            try:
+                job.status = "failed"
+                job.error = str(e)
+                job.finished_at = datetime.now(timezone.utc)
+                job.duration_ms = int((time.perf_counter() - t0) * 1000)
+                db.add(job)
+                db.commit()
+            except Exception:
+                db.rollback()
+            raise HTTPException(status_code=500, detail=str(e)) from e
+
+        try:
+            job.status = "completed"
+            job.mode = "libreoffice"
+            job.finished_at = datetime.now(timezone.utc)
+            job.duration_ms = int((time.perf_counter() - t0) * 1000)
+            db.add(job)
+            db.commit()
+        except Exception:
+            db.rollback()
+
+        out_name = safe_filename(Path(filename).stem, fallback="document") + ".pdf"
+        return FileResponse(
+            path=str(result_pdf),
+            media_type="application/pdf",
+            filename=out_name,
+            headers={
+                "X-Conversion-Mode": "libreoffice",
             },
         )
 

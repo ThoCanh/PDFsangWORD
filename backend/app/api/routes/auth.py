@@ -22,6 +22,7 @@ class RegisterResponse(BaseModel):
     id: int
     email: EmailStr
     role: str
+    plan_key: str
 
 
 class LoginRequest(BaseModel):
@@ -38,6 +39,11 @@ class MeResponse(BaseModel):
     id: int
     email: EmailStr
     role: str
+    plan_key: str
+
+
+class UpdatePlanRequest(BaseModel):
+    plan_key: str
 
 
 @router.post("/register", response_model=RegisterResponse)
@@ -50,12 +56,13 @@ def register(payload: RegisterRequest, db: Session = Depends(get_db)):
         email=payload.email.lower(),
         password_hash=hash_password(payload.password),
         role="user",
+        plan_key="free",
     )
     db.add(user)
     db.commit()
     db.refresh(user)
 
-    return RegisterResponse(id=user.id, email=user.email, role=user.role)
+    return RegisterResponse(id=user.id, email=user.email, role=user.role, plan_key=user.plan_key)
 
 
 @router.post("/login", response_model=TokenResponse)
@@ -78,4 +85,35 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)):
 
 @router.get("/me", response_model=MeResponse)
 def me(current_user: User = Depends(get_current_user)):
-    return MeResponse(id=current_user.id, email=current_user.email, role=current_user.role)
+    return MeResponse(
+        id=current_user.id,
+        email=current_user.email,
+        role=current_user.role,
+        plan_key=getattr(current_user, "plan_key", "free"),
+    )
+
+
+@router.put("/me/plan", response_model=MeResponse)
+def update_my_plan(
+    payload: UpdatePlanRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    key = (payload.plan_key or "").strip()
+    if not key:
+        raise HTTPException(status_code=400, detail="plan_key is required")
+
+    # Allow a simple free plan and future paid plans by id.
+    if key != "free" and not (key.startswith("plan:") and key[5:].isdigit()):
+        raise HTTPException(status_code=400, detail="invalid plan_key")
+
+    current_user.plan_key = key
+    db.add(current_user)
+    db.commit()
+    db.refresh(current_user)
+    return MeResponse(
+        id=current_user.id,
+        email=current_user.email,
+        role=current_user.role,
+        plan_key=getattr(current_user, "plan_key", "free"),
+    )

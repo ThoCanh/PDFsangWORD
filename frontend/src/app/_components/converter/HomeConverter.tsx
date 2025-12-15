@@ -13,10 +13,11 @@ import {
   Sparkles,
   Upload,
 } from "lucide-react";
-import { IS_DEMO_MODE, API_URL, GEMINI_API_KEY } from "../../_config/app";
+import { IS_DEMO_MODE, API_URL, GEMINI_API_KEY, BACKEND_URL } from "../../_config/app";
 import { TOOL_CONFIG, type ToolKey } from "../../_config/tools";
 import { useConverter } from "../../_hooks/useConverter";
 import { useGeminiAssistant } from "../../_hooks/useGeminiAssistant";
+import { useAuth } from "../auth/AuthContext";
 
 type Props = {
   activeTool: ToolKey;
@@ -42,7 +43,10 @@ function uploadBadgeClass(activeTool: ToolKey) {
 }
 
 export default function HomeConverter({ activeTool, onSelectTool }: Props) {
+  const { planKey } = useAuth();
   const currentConfig = useMemo(() => TOOL_CONFIG[activeTool], [activeTool]);
+
+  const [allowedTools, setAllowedTools] = React.useState<Set<ToolKey> | null>(null);
 
   const converter = useConverter({
     activeTool,
@@ -64,6 +68,62 @@ export default function HomeConverter({ activeTool, onSelectTool }: Props) {
     onSelectTool(tool);
     converter.removeFile();
   };
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadAllowedTools() {
+      if (!planKey || !planKey.startsWith("plan:")) {
+        if (!cancelled) setAllowedTools(null);
+        return;
+      }
+
+      const id = Number(planKey.split(":", 2)[1]);
+      if (!Number.isFinite(id)) {
+        if (!cancelled) setAllowedTools(null);
+        return;
+      }
+
+      try {
+        const res = await fetch(`${BACKEND_URL}/plans`);
+        if (!res.ok) {
+          if (!cancelled) setAllowedTools(null);
+          return;
+        }
+
+        const data = (await res.json()) as Array<{ id: number; tools?: string[] }>;
+        const plan = Array.isArray(data) ? data.find((p) => p?.id === id) : undefined;
+        const tools = Array.isArray(plan?.tools) ? plan?.tools : [];
+        const normalized = tools.map((t) => String(t)) as ToolKey[];
+        const set = new Set<ToolKey>(
+          normalized.filter((t) => t in TOOL_CONFIG) as ToolKey[],
+        );
+
+        // Backward compatible: empty list => allow all tools.
+        if (!cancelled) setAllowedTools(set.size ? set : null);
+      } catch {
+        if (!cancelled) setAllowedTools(null);
+      }
+    }
+
+    void loadAllowedTools();
+    return () => {
+      cancelled = true;
+    };
+  }, [planKey]);
+
+  const isToolAllowed = useMemo(() => {
+    return (tool: ToolKey) => !allowedTools || allowedTools.has(tool);
+  }, [allowedTools]);
+
+  useEffect(() => {
+    if (!allowedTools) return;
+    if (allowedTools.has(activeTool)) return;
+
+    const firstAllowed = (Object.keys(TOOL_CONFIG) as ToolKey[]).find((k) => allowedTools.has(k));
+    if (firstAllowed) switchTool(firstAllowed);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allowedTools, activeTool]);
 
   const Icon = currentConfig.icon;
 
@@ -113,14 +173,19 @@ export default function HomeConverter({ activeTool, onSelectTool }: Props) {
             {Object.entries(TOOL_CONFIG).map(([key, config]) => {
               const toolKey = key as ToolKey;
               const TabIcon = config.icon;
+              const allowed = isToolAllowed(toolKey);
               return (
                 <button
                   key={toolKey}
-                  onClick={() => switchTool(toolKey)}
+                  onClick={() => (allowed ? switchTool(toolKey) : undefined)}
+                  disabled={!allowed}
+                  title={allowed ? undefined : "Chức năng này không có trong gói của bạn"}
                   className={`px-5 py-2 rounded-t-lg text-sm font-medium transition-colors flex items-center gap-2 ${
                     activeTool === toolKey
                       ? "bg-white text-slate-800 shadow-sm pt-3"
-                      : "bg-white/10 text-white/70 hover:bg-white/20 backdrop-blur-sm"
+                      : allowed
+                        ? "bg-white/10 text-white/70 hover:bg-white/20 backdrop-blur-sm"
+                        : "bg-white/10 text-white/40 backdrop-blur-sm cursor-not-allowed opacity-60"
                   }`}
                 >
                   <TabIcon size={18} />
@@ -192,6 +257,12 @@ export default function HomeConverter({ activeTool, onSelectTool }: Props) {
                     </button>
                     <button
                       onClick={converter.handleConvert}
+                      disabled={!isToolAllowed(activeTool)}
+                      title={
+                        isToolAllowed(activeTool)
+                          ? undefined
+                          : "Chức năng này không có trong gói của bạn"
+                      }
                       className={`flex-1 py-3 text-white font-medium rounded-xl shadow-lg transition-all flex items-center justify-center gap-2 ${primaryButtonClass(
                         activeTool
                       )}`}

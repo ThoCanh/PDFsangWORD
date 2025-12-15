@@ -17,9 +17,10 @@ type AdminUser = {
 type Props = {
   onAddUser: () => void;
   onEditUser: (user: UserRow) => void;
+  reloadToken?: number;
 };
 
-export default function UsersView({ onAddUser, onEditUser }: Props) {
+export default function UsersView({ onAddUser, onEditUser, reloadToken }: Props) {
   const [search, setSearch] = React.useState("");
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
@@ -75,7 +76,7 @@ export default function UsersView({ onAddUser, onEditUser }: Props) {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [reloadToken]);
 
   const filtered = React.useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -197,7 +198,7 @@ export default function UsersView({ onAddUser, onEditUser }: Props) {
                   <td className="p-4 text-right">
                     <button
                       onClick={() => onEditUser(u)}
-                      className="inline-flex items-center px-3 py-1.5 text-sm font-medium bg-white border border-slate-200 rounded-lg hover:bg-slate-100"
+                      className="inline-flex items-center px-3 py-1.5 text-sm font-medium bg-white border border-slate-200 rounded-lg hover:bg-slate-100 text-slate-900"
                     >
                       <Edit2 size={14} className="mr-2 text-slate-500" /> Sửa
                     </button>

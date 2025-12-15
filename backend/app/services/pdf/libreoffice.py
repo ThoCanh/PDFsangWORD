@@ -75,3 +75,67 @@ def convert_pdf_to_docx(
         raise LibreOfficeConvertError("LibreOffice produced empty DOCX")
 
     return out_docx
+
+
+def convert_word_to_pdf(
+    *,
+    word_path: Path,
+    out_dir: Path,
+    soffice_path: str,
+    timeout_sec: int,
+    user_install_dir: Path | None = None,
+) -> Path:
+    """Convert DOC/DOCX to PDF using LibreOffice.
+
+    Returns path to generated .pdf.
+    """
+
+    if not word_path.exists():
+        raise FileNotFoundError(str(word_path))
+    if not out_dir.exists():
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+    cmd = [
+        soffice_path,
+        "--headless",
+        "--nologo",
+        "--nofirststartwizard",
+        "--norestore",
+    ]
+    if user_install_dir:
+        user_install_dir.mkdir(parents=True, exist_ok=True)
+        cmd.append(f"-env:UserInstallation={user_install_dir.as_uri()}")
+
+    cmd += [
+        "--convert-to",
+        "pdf",
+        "--outdir",
+        str(out_dir),
+        str(word_path),
+    ]
+
+    try:
+        completed = subprocess.run(
+            cmd,
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=timeout_sec,
+        )
+    except subprocess.TimeoutExpired as e:
+        raise LibreOfficeConvertError("LibreOffice conversion timed out") from e
+    except subprocess.CalledProcessError as e:
+        stderr = (e.stderr or "").strip()
+        tail = stderr[-800:] if stderr else ""
+        raise LibreOfficeConvertError(f"LibreOffice conversion failed: {tail}") from e
+
+    outputs = sorted(out_dir.glob("*.pdf"), key=lambda p: p.stat().st_mtime, reverse=True)
+    if not outputs:
+        debug = (completed.stderr or completed.stdout or "").strip()
+        raise LibreOfficeConvertError(f"LibreOffice did not produce PDF. Output: {debug[-800:]}")
+
+    out_pdf = outputs[0]
+    if out_pdf.stat().st_size == 0:
+        raise LibreOfficeConvertError("LibreOffice produced empty PDF")
+
+    return out_pdf
