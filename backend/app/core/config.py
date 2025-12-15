@@ -63,5 +63,24 @@ class Settings:
     # Tier B (Image fallback)
     pdf_image_dpi: int = int(os.getenv("PDF_IMAGE_DPI", "250"))
 
+    # Payments (SePay VA)
+    # These are used to generate VietQR links and validate webhook calls.
+    sepay_bank: str = os.getenv("SEPAY_BANK", "").strip()
+    sepay_va_account: str = os.getenv("SEPAY_VA_ACCOUNT", "").strip()
+    # Transfer content rules (as shown in SePay docs/UI):
+    # - Must start with prefix (often: SEVQR)
+    # - Must contain a keyword that includes VA account (often: TKP{VA_ACCOUNT})
+    sepay_transfer_prefix: str = os.getenv("SEPAY_TRANSFER_PREFIX", "SEVQR").strip() or "SEVQR"
+    sepay_keyword_prefix: str = os.getenv("SEPAY_KEYWORD_PREFIX", "TKP").strip() or "TKP"
+
+    # If set, webhook must present this secret.
+    # Supported locations:
+    # - Header: X-SePay-Token
+    # - Query:  ?token=...
+    sepay_webhook_secret: str = os.getenv("SEPAY_WEBHOOK_SECRET", "").strip()
+
+    # QR image base URL
+    sepay_qr_base_url: str = os.getenv("SEPAY_QR_BASE_URL", "https://qr.sepay.vn/img").strip().rstrip("/")
+
 
 settings = Settings()

@@ -71,3 +71,62 @@ class Plan(Base):
     features_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
     tools_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class PaymentOrder(Base):
+    __tablename__ = "payment_orders"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+    paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    provider: Mapped[str] = mapped_column(String(32), nullable=False, default="sepay")
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
+
+    user_id: Mapped[int] = mapped_column(Integer, index=True, nullable=False)
+    plan_id: Mapped[int] = mapped_column(Integer, index=True, nullable=False)
+
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    subtotal_vnd: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    discount_vnd: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    total_vnd: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    promo_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+    # Code embedded in transfer content to match webhook -> order.
+    order_code: Mapped[str] = mapped_column(String(32), unique=True, index=True, nullable=False)
+    transfer_content: Mapped[str] = mapped_column(String(255), nullable=False)
+    qr_image_url: Mapped[str] = mapped_column(Text, nullable=False)
+
+    raw_meta_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+
+
+class PaymentTransaction(Base):
+    __tablename__ = "payment_transactions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+
+    provider: Mapped[str] = mapped_column(String(32), nullable=False, default="sepay")
+    # Provider transaction identifier (idempotency key).
+    provider_tx_id: Mapped[str] = mapped_column(String(128), unique=True, index=True, nullable=False)
+
+    amount_vnd: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    bank: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    account: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+    occurred_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    order_id: Mapped[int | None] = mapped_column(Integer, index=True, nullable=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="received")
+
+    raw_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
