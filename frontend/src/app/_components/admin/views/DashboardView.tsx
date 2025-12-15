@@ -2,15 +2,176 @@
 
 import React from "react";
 import { Activity, Cpu, Database, FileText, MoreVertical } from "lucide-react";
-import { MOCK_STATS, RECENT_DOCS, SYSTEM_LOGS } from "../_data/mock";
+import { Bot, CheckCircle, Clock } from "lucide-react";
+import { BACKEND_URL } from "../../../_config/app";
+import { RECENT_DOCS, SYSTEM_LOGS } from "../_data/mock";
 import ConfidenceBar from "../_ui/ConfidenceBar";
 import { StatusBadge } from "../_ui/Badges";
 
+type AdminStatsResponse = {
+  total_documents: number;
+  ai_processed: number;
+  accuracy_rate: number;
+  processing_queue: number;
+  total_documents_change: string;
+  ai_processed_change: string;
+  accuracy_rate_change: string;
+  processing_queue_change: string;
+};
+
+type SystemMetrics = {
+  cpu_percent: number;
+  ram_used_bytes: number;
+  ram_total_bytes: number;
+  ram_percent: number;
+};
+
+function changeClass(change: string) {
+  if (change.startsWith("+")) return "text-green-600";
+  if (change.startsWith("-")) return "text-red-600";
+  return "text-slate-400";
+}
+
 export default function DashboardView() {
+  const [stats, setStats] = React.useState<AdminStatsResponse | null>(null);
+  const [statsError, setStatsError] = React.useState<string | null>(null);
+
+  const [metrics, setMetrics] = React.useState<SystemMetrics | null>(null);
+  const [metricsError, setMetricsError] = React.useState<string | null>(null);
+  const [loadingMetrics, setLoadingMetrics] = React.useState(false);
+
+  const formatRam = (usedBytes: number, totalBytes: number) => {
+    const usedGb = usedBytes / 1024 / 1024 / 1024;
+    const totalGb = totalBytes / 1024 / 1024 / 1024;
+    return `${usedGb.toFixed(1)}GB / ${totalGb.toFixed(1)}GB`;
+  };
+
+  React.useEffect(() => {
+    const token = window.localStorage.getItem("access_token");
+    if (!token) {
+      setStatsError("Missing token");
+      return;
+    }
+
+    fetch(`${BACKEND_URL}/admin/stats`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then((r) => (r.ok ? r.json() : Promise.reject(r)))
+      .then((data: AdminStatsResponse) => {
+        setStats(data);
+        setStatsError(null);
+      })
+      .catch(() => setStatsError("Không thể tải thống kê"));
+  }, []);
+
+  React.useEffect(() => {
+    const token = window.localStorage.getItem("access_token");
+    if (!token) return;
+
+    let cancelled = false;
+    const controller = new AbortController();
+
+    const fetchMetrics = async () => {
+      setLoadingMetrics(true);
+      setMetricsError(null);
+
+      try {
+        const res = await fetch(`${BACKEND_URL}/admin/system/metrics`, {
+          headers: { Authorization: `Bearer ${token}` },
+          signal: controller.signal,
+        });
+
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+        const data = (await res.json()) as SystemMetrics;
+        if (!cancelled) setMetrics(data);
+      } catch (e) {
+        if (cancelled) return;
+        if (e instanceof DOMException && e.name === "AbortError") return;
+        setMetricsError("Không thể tải trạng thái hệ thống.");
+      } finally {
+        if (!cancelled) setLoadingMetrics(false);
+      }
+    };
+
+    fetchMetrics();
+    const timer = window.setInterval(fetchMetrics, 5000);
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+      window.clearInterval(timer);
+    };
+  }, []);
+
+  const cards = React.useMemo(() => {
+    if (!stats) return [];
+    return [
+      {
+        label: "Tổng tài liệu",
+        value: stats.total_documents.toLocaleString("vi-VN"),
+        change: stats.total_documents_change,
+        icon: FileText,
+        color: "text-blue-600",
+        bg: "bg-blue-100",
+      },
+      {
+        label: "AI Đã xử lý",
+        value: stats.ai_processed.toLocaleString("vi-VN"),
+        change: stats.ai_processed_change,
+        icon: Bot,
+        color: "text-purple-600",
+        bg: "bg-purple-100",
+      },
+      {
+        label: "Tỉ lệ chính xác",
+        value: `${stats.accuracy_rate.toFixed(1)}%`,
+        change: stats.accuracy_rate_change,
+        icon: CheckCircle,
+        color: "text-green-600",
+        bg: "bg-green-100",
+      },
+      {
+        label: "Hàng đợi xử lý",
+        value: stats.processing_queue.toLocaleString("vi-VN"),
+        change: stats.processing_queue_change,
+        icon: Clock,
+        color: "text-orange-600",
+        bg: "bg-orange-100",
+      },
+    ];
+  }, [stats]);
+
   return (
     <div className="space-y-6 animate-fade-in">
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        {MOCK_STATS.map((stat) => {
+        {!stats && !statsError &&
+          Array.from({ length: 4 }).map((_, i) => (
+            <div
+              key={i}
+              className="bg-white rounded-xl p-6 shadow-sm border border-slate-100 animate-pulse"
+            >
+              <div className="flex justify-between items-start">
+                <div className="space-y-3">
+                  <div className="h-4 w-28 bg-slate-200 rounded" />
+                  <div className="h-8 w-24 bg-slate-200 rounded" />
+                </div>
+                <div className="h-12 w-12 bg-slate-200 rounded-lg" />
+              </div>
+              <div className="mt-4 h-4 w-40 bg-slate-200 rounded" />
+            </div>
+          ))}
+
+        {statsError && (
+          <div className="lg:col-span-4 bg-white rounded-xl p-6 shadow-sm border border-slate-100">
+            <div className="text-sm text-rose-700 font-medium">{statsError}</div>
+            <div className="text-xs text-slate-500 mt-1">
+              Hãy đảm bảo bạn đăng nhập admin và backend đang chạy.
+            </div>
+          </div>
+        )}
+
+        {cards.map((stat) => {
           const Icon = stat.icon;
           return (
             <div
@@ -19,9 +180,7 @@ export default function DashboardView() {
             >
               <div className="flex justify-between items-start">
                 <div>
-                  <p className="text-sm font-medium text-slate-500">
-                    {stat.label}
-                  </p>
+                  <p className="text-sm font-medium text-slate-500">{stat.label}</p>
                   <h3 className="text-2xl font-bold text-slate-800 mt-2">
                     {stat.value}
                   </h3>
@@ -31,13 +190,7 @@ export default function DashboardView() {
                 </div>
               </div>
               <div className="mt-4 flex items-center text-sm">
-                <span
-                  className={
-                    stat.change.startsWith("+") ? "text-green-600" : "text-red-600"
-                  }
-                >
-                  {stat.change}
-                </span>
+                <span className={changeClass(stat.change)}>{stat.change}</span>
                 <span className="text-slate-400 ml-2">so với tháng trước</span>
               </div>
             </div>
@@ -125,15 +278,33 @@ export default function DashboardView() {
               <div className="flex items-center justify-center mb-1 text-slate-500 text-xs uppercase font-bold">
                 <Cpu size={12} className="mr-1" /> CPU Usage
               </div>
-              <div className="text-xl font-bold text-slate-700">42%</div>
+              <div className="text-xl font-bold text-slate-700">
+                {loadingMetrics
+                  ? "…"
+                  : metrics?.cpu_percent != null
+                    ? `${Math.round(metrics.cpu_percent)}%`
+                    : "—"}
+              </div>
             </div>
             <div className="bg-slate-50 p-3 rounded-lg text-center">
               <div className="flex items-center justify-center mb-1 text-slate-500 text-xs uppercase font-bold">
                 <Database size={12} className="mr-1" /> RAM Usage
               </div>
-              <div className="text-xl font-bold text-slate-700">2.4GB</div>
+              <div className="text-xl font-bold text-slate-700">
+                {loadingMetrics
+                  ? "…"
+                  : metrics
+                    ? formatRam(metrics.ram_used_bytes, metrics.ram_total_bytes)
+                    : "—"}
+              </div>
             </div>
           </div>
+
+          {metricsError ? (
+            <div className="px-6 pb-4 text-xs text-rose-700 font-medium">
+              {metricsError}
+            </div>
+          ) : null}
 
           <div className="flex-1 overflow-y-auto p-4 space-y-3 max-h-[300px]">
             {SYSTEM_LOGS.map((log) => (

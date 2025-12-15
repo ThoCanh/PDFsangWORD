@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, Integer, String, func
+from sqlalchemy import DateTime, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base
@@ -21,3 +21,27 @@ class User(Base):
         server_default=func.now(),
         nullable=False,
     )
+
+
+class ConversionJob(Base):
+    __tablename__ = "conversion_jobs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    tool_type: Mapped[str] = mapped_column(String(32), index=True, nullable=False)
+    filename: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    client_ip: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+    status: Mapped[str] = mapped_column(String(32), index=True, nullable=False, default="processing")
+    mode: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    has_text_layer: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    size_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)

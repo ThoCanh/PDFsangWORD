@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from datetime import timedelta
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, EmailStr
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -10,7 +11,7 @@ from sqlalchemy.orm import Session
 from ..deps import get_db, require_admin
 from ...core.config import settings
 from ...core.log_buffer import get_log_items
-from ...db.models import User
+from ...db.models import ConversionJob, User
 from ...utils.files import which
 
 
@@ -50,6 +51,35 @@ class SystemStatusResponse(BaseModel):
     users_count: int
     db_ok: bool
     conversion: dict
+
+
+class SystemMetricsResponse(BaseModel):
+    cpu_percent: float
+    ram_used_bytes: int
+    ram_total_bytes: int
+    ram_percent: float
+
+
+@router.get("/system/metrics", response_model=SystemMetricsResponse)
+def system_metrics(_: User = Depends(require_admin)):
+    try:
+        import psutil  # type: ignore
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(
+            status_code=500,
+            detail="psutil is not installed on the server",
+        ) from e
+
+    # interval>0 gives a real sampled reading.
+    cpu_percent = float(psutil.cpu_percent(interval=0.2))
+    vm = psutil.virtual_memory()
+
+    return SystemMetricsResponse(
+        cpu_percent=cpu_percent,
+        ram_used_bytes=int(vm.used),
+        ram_total_bytes=int(vm.total),
+        ram_percent=float(vm.percent),
+    )
 
 
 @router.get("/system/status", response_model=SystemStatusResponse)
@@ -116,3 +146,106 @@ def system_logs(limit: int = 200, _: User = Depends(require_admin)):
         )
         for i in items
     ]
+
+
+class AdminStatsResponse(BaseModel):
+    total_documents: int
+    ai_processed: int
+    accuracy_rate: float
+    processing_queue: int
+
+    total_documents_change: str
+    ai_processed_change: str
+    accuracy_rate_change: str
+    processing_queue_change: str
+
+
+def _pct_change(current: int, previous: int) -> str:
+    if previous <= 0:
+        if current <= 0:
+            return "0%"
+        return "+100%"
+    diff = (current - previous) / previous * 100.0
+    return f"{diff:+.0f}%"
+
+
+def _pp_change(current_rate: float, previous_rate: float) -> str:
+    diff = current_rate - previous_rate
+    return f"{diff:+.1f}%"
+
+
+@router.get("/stats", response_model=AdminStatsResponse)
+def admin_stats(db: Session = Depends(get_db), _: User = Depends(require_admin)):
+    now = datetime.now(timezone.utc)
+    d30 = now - timedelta(days=30)
+    d60 = now - timedelta(days=60)
+
+    total_documents = db.query(ConversionJob).count()
+    ai_processed = db.query(ConversionJob).filter(ConversionJob.tool_type == "pdf-word").count()
+    processing_queue = (
+        db.query(ConversionJob)
+        .filter(ConversionJob.status == "processing")
+        .count()
+    )
+
+    completed = (
+        db.query(ConversionJob)
+        .filter(ConversionJob.status == "completed")
+        .count()
+    )
+    accuracy_rate = round((completed / total_documents * 100.0), 1) if total_documents else 0.0
+
+    current_total = db.query(ConversionJob).filter(ConversionJob.created_at >= d30).count()
+    prev_total = (
+        db.query(ConversionJob)
+        .filter(ConversionJob.created_at >= d60, ConversionJob.created_at < d30)
+        .count()
+    )
+
+    current_ai = (
+        db.query(ConversionJob)
+        .filter(ConversionJob.tool_type == "pdf-word", ConversionJob.created_at >= d30)
+        .count()
+    )
+    prev_ai = (
+        db.query(ConversionJob)
+        .filter(
+            ConversionJob.tool_type == "pdf-word",
+            ConversionJob.created_at >= d60,
+            ConversionJob.created_at < d30,
+        )
+        .count()
+    )
+
+    current_completed = (
+        db.query(ConversionJob)
+        .filter(ConversionJob.status == "completed", ConversionJob.created_at >= d30)
+        .count()
+    )
+    current_total_for_rate = current_total
+    current_rate = (
+        current_completed / current_total_for_rate * 100.0 if current_total_for_rate else 0.0
+    )
+
+    prev_completed = (
+        db.query(ConversionJob)
+        .filter(
+            ConversionJob.status == "completed",
+            ConversionJob.created_at >= d60,
+            ConversionJob.created_at < d30,
+        )
+        .count()
+    )
+    prev_total_for_rate = prev_total
+    prev_rate = prev_completed / prev_total_for_rate * 100.0 if prev_total_for_rate else 0.0
+
+    return AdminStatsResponse(
+        total_documents=total_documents,
+        ai_processed=ai_processed,
+        accuracy_rate=accuracy_rate,
+        processing_queue=processing_queue,
+        total_documents_change=_pct_change(current_total, prev_total),
+        ai_processed_change=_pct_change(current_ai, prev_ai),
+        accuracy_rate_change=_pp_change(round(current_rate, 1), round(prev_rate, 1)),
+        processing_queue_change="—",
+    )
