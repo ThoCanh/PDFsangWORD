@@ -4,6 +4,7 @@ import React from "react";
 import { useRouter, usePathname } from "next/navigation";
 
 import { BACKEND_URL } from "../../_config/app";
+import { clearAccessToken, getAccessToken } from "./token";
 
 type Role = "user" | "admin";
 
@@ -25,7 +26,7 @@ export default function RequireAuth({ allow, children }: Props) {
       setReady(false);
       setError(null);
 
-      const token = window.localStorage.getItem("access_token");
+      const token = getAccessToken();
       if (!token) {
         router.replace("/login");
         return;
@@ -36,7 +37,7 @@ export default function RequireAuth({ allow, children }: Props) {
           headers: { Authorization: `Bearer ${token}` },
         });
         if (!res.ok) {
-          window.localStorage.removeItem("access_token");
+          clearAccessToken();
           router.replace("/login");
           return;
         }
@@ -52,9 +53,9 @@ export default function RequireAuth({ allow, children }: Props) {
         }
 
         if (!cancelled) setReady(true);
-      } catch (e: any) {
+      } catch (e: unknown) {
         if (!cancelled) {
-          setError(e?.message ?? "Auth check failed");
+          setError(e instanceof Error ? e.message : "Auth check failed");
           setReady(false);
         }
       }

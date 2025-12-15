@@ -59,7 +59,7 @@ export default function ProPlanView({ onAddPlan, onAssignPackage }: Props) {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Tìm theo tên/email/id/gói..."
-            className="w-full pl-9 pr-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+            className="w-full pl-9 pr-3 py-2 border border-slate-300 rounded-lg bg-white text-slate-900 placeholder:text-slate-400 focus:ring-2 focus:ring-indigo-500 outline-none"
           />
         </div>
       </div>

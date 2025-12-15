@@ -45,3 +45,23 @@ class ConversionJob(Base):
     duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class Plan(Base):
+    __tablename__ = "plans"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+
+    name: Mapped[str] = mapped_column(String(128), unique=True, index=True, nullable=False)
+    price_vnd: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    billing_cycle: Mapped[str] = mapped_column(String(16), nullable=False, default="month")
+    doc_limit_per_month: Mapped[int] = mapped_column(Integer, nullable=False, default=1000)
+
+    # Stored as JSON text for simplicity.
+    features_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)

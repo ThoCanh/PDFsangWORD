@@ -1,6 +1,7 @@
 "use client";
 import React, { createContext, useContext, useEffect, useState } from "react";
 import { BACKEND_URL } from "../../_config/app";
+import { clearAccessToken, getAccessToken, setAccessToken } from "./token";
 
 type AuthContextType = {
   email: string | null;
@@ -28,7 +29,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   // Refresh user info from token
   const refresh = React.useCallback(() => {
-    const token = window.localStorage.getItem("access_token");
+    const token = getAccessToken();
     if (!token) {
       setEmail(null);
       setRole(null);
@@ -52,21 +53,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // Set token and refresh
   const setAuth = React.useCallback((token: string | null) => {
     if (token) {
-      window.localStorage.setItem("access_token", token);
+      setAccessToken(token, "local");
     } else {
-      window.localStorage.removeItem("access_token");
+      clearAccessToken();
     }
     refresh();
   }, [refresh]);
 
   const logout = React.useCallback(() => {
-    window.localStorage.removeItem("access_token");
+    clearAccessToken();
     setEmail(null);
     setRole(null);
-    // Broadcast storage change to other tabs/components
-    try {
-      window.dispatchEvent(new StorageEvent("storage", { key: "access_token" }));
-    } catch {}
   }, []);
 
   useEffect(() => {

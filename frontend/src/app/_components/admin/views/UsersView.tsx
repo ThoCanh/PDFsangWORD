@@ -5,6 +5,7 @@ import { Edit2, Search, UserPlus } from "lucide-react";
 import { RoleBadge, StatusBadge } from "../_ui/Badges";
 import { BACKEND_URL } from "../../../_config/app";
 import type { UserRow } from "../_data/mock";
+import { getAccessToken } from "../../auth/token";
 
 type AdminUser = {
   id: number;
@@ -31,7 +32,7 @@ export default function UsersView({ onAddUser, onEditUser }: Props) {
       setLoading(true);
       setError(null);
       try {
-        const token = window.localStorage.getItem("access_token");
+        const token = getAccessToken();
         const res = await fetch(`${BACKEND_URL}/admin/users`, {
           headers: token ? { Authorization: `Bearer ${token}` } : undefined,
         });
@@ -61,8 +62,10 @@ export default function UsersView({ onAddUser, onEditUser }: Props) {
         });
 
         if (!cancelled) setRows(mapped);
-      } catch (e: any) {
-        if (!cancelled) setError(e?.message ?? "Không thể tải dữ liệu");
+      } catch (e: unknown) {
+        if (!cancelled) {
+          setError(e instanceof Error ? e.message : "Không thể tải dữ liệu");
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -115,7 +118,7 @@ export default function UsersView({ onAddUser, onEditUser }: Props) {
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Tìm theo tên, email, id..."
-              className="w-full pl-9 pr-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+              className="w-full pl-9 pr-3 py-2 border border-slate-300 rounded-lg bg-white text-slate-900 placeholder:text-slate-400 focus:ring-2 focus:ring-indigo-500 outline-none"
             />
           </div>
 

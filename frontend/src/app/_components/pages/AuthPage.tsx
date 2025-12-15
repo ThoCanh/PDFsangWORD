@@ -99,8 +99,6 @@ export default function AuthPage({ onNavigate, onAuthSuccess }: Props) {
       }
 
       const tokenJson = (await loginRes.json()) as { access_token: string };
-      setAuth(tokenJson.access_token);
-
       const meRes = await fetch(`${BACKEND_URL}/auth/me`, {
         headers: { Authorization: `Bearer ${tokenJson.access_token}` },
       });
@@ -110,13 +108,75 @@ export default function AuthPage({ onNavigate, onAuthSuccess }: Props) {
       }
 
       const me = (await meRes.json()) as { role: "user" | "admin" };
-      if (onAuthSuccess) {
-        onAuthSuccess(me.role);
-      } else {
+
+      if (me.role === "admin") {
+        // Admin login: open a new tab for /admin and keep this tab logged out.
+        // NOTE: This avoids sharing auth with the normal user site tab.
+        setAuth(null);
+
+        // Reliable cross-tab handoff: store token under a one-time key (not access_token)
+        // so the user tab does not become authenticated.
+        const nonce =
+          typeof crypto !== "undefined" && "randomUUID" in crypto
+            ? crypto.randomUUID()
+            : String(Date.now()) + "_" + Math.random().toString(16).slice(2);
+        const onceKey = `admin_auth_token_once:${nonce}`;
+        try {
+          window.localStorage.setItem(onceKey, tokenJson.access_token);
+          // Clean up if the admin tab never consumes it.
+          window.setTimeout(() => {
+            try {
+              window.localStorage.removeItem(onceKey);
+            } catch {}
+          }, 60_000);
+        } catch {}
+
+        const payload = {
+          type: "ADMIN_AUTH_TOKEN",
+          token: tokenJson.access_token,
+        };
+
+        const adminWin = window.open(
+          `/admin?waitToken=1&nonce=${encodeURIComponent(nonce)}`,
+          "_blank",
+          "noopener,noreferrer",
+        );
+        if (!adminWin) {
+          throw new Error(
+            "Trình duyệt đã chặn mở tab mới. Hãy cho phép pop-up để vào trang Admin.",
+          );
+        }
+
+        try {
+          adminWin.focus?.();
+        } catch {}
+
+        // Send token to the new tab without putting it in localStorage.
+        try {
+          const bc = new BroadcastChannel("docuflow_admin_auth");
+          bc.postMessage(payload);
+          bc.close();
+        } catch {}
+
+        const send = () => {
+          try {
+            adminWin.postMessage(payload, window.location.origin);
+          } catch {}
+        };
+        send();
+        window.setTimeout(send, 250);
+        window.setTimeout(send, 1000);
+
         onNavigate("home");
+        return;
       }
-    } catch (err: any) {
-      setError(err?.message ?? "Có lỗi xảy ra");
+
+      // Normal user login: store token and navigate.
+      setAuth(tokenJson.access_token);
+      if (onAuthSuccess) onAuthSuccess(me.role);
+      else onNavigate("home");
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Có lỗi xảy ra");
     } finally {
       setIsLoading(false);
     }

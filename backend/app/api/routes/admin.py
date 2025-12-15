@@ -11,11 +11,112 @@ from sqlalchemy.orm import Session
 from ..deps import get_db, require_admin
 from ...core.config import settings
 from ...core.log_buffer import get_log_items
-from ...db.models import ConversionJob, User
+from ...db.models import ConversionJob, Plan, User
 from ...utils.files import which
 
 
 router = APIRouter(prefix="/admin", tags=["admin"])
+
+
+class PlanCreateRequest(BaseModel):
+    name: str
+    price_vnd: int = 0
+    billing_cycle: str = "month"  # month|year|lifetime
+    doc_limit_per_month: int = 1000
+    features: list[str] = []
+    notes: str | None = None
+
+
+class PlanResponse(BaseModel):
+    id: int
+    created_at: datetime
+    name: str
+    price_vnd: int
+    billing_cycle: str
+    doc_limit_per_month: int
+    features: list[str]
+    notes: str | None
+
+
+@router.get("/plans", response_model=list[PlanResponse])
+def list_plans(db: Session = Depends(get_db), _: User = Depends(require_admin)):
+    plans = db.query(Plan).order_by(Plan.created_at.desc(), Plan.id.desc()).all()
+    out: list[PlanResponse] = []
+    for p in plans:
+        try:
+            import json
+
+            features = json.loads(p.features_json) if p.features_json else []
+            if not isinstance(features, list):
+                features = []
+            features = [str(x) for x in features]
+        except Exception:
+            features = []
+
+        out.append(
+            PlanResponse(
+                id=p.id,
+                created_at=p.created_at,
+                name=p.name,
+                price_vnd=p.price_vnd,
+                billing_cycle=p.billing_cycle,
+                doc_limit_per_month=p.doc_limit_per_month,
+                features=features,
+                notes=p.notes,
+            )
+        )
+    return out
+
+
+@router.post("/plans", response_model=PlanResponse)
+def create_plan(
+    body: PlanCreateRequest,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_admin),
+):
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="name is required")
+
+    cycle = body.billing_cycle.strip().lower()
+    if cycle not in {"month", "year", "lifetime"}:
+        raise HTTPException(status_code=422, detail="billing_cycle must be month|year|lifetime")
+
+    if body.price_vnd < 0:
+        raise HTTPException(status_code=422, detail="price_vnd must be >= 0")
+    if body.doc_limit_per_month < 0:
+        raise HTTPException(status_code=422, detail="doc_limit_per_month must be >= 0")
+
+    exists = db.query(Plan).filter(Plan.name == name).first()
+    if exists:
+        raise HTTPException(status_code=409, detail="plan name already exists")
+
+    import json
+
+    features = [str(x).strip() for x in (body.features or []) if str(x).strip()]
+
+    plan = Plan(
+        name=name,
+        price_vnd=int(body.price_vnd),
+        billing_cycle=cycle,
+        doc_limit_per_month=int(body.doc_limit_per_month),
+        features_json=json.dumps(features, ensure_ascii=False),
+        notes=body.notes.strip() if body.notes else None,
+    )
+    db.add(plan)
+    db.commit()
+    db.refresh(plan)
+
+    return PlanResponse(
+        id=plan.id,
+        created_at=plan.created_at,
+        name=plan.name,
+        price_vnd=plan.price_vnd,
+        billing_cycle=plan.billing_cycle,
+        doc_limit_per_month=plan.doc_limit_per_month,
+        features=features,
+        notes=plan.notes,
+    )
 
 
 @router.get("/ping")

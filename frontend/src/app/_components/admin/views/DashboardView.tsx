@@ -7,6 +7,7 @@ import { BACKEND_URL } from "../../../_config/app";
 import { RECENT_DOCS, SYSTEM_LOGS } from "../_data/mock";
 import ConfidenceBar from "../_ui/ConfidenceBar";
 import { StatusBadge } from "../_ui/Badges";
+import { getAccessToken } from "../../auth/token";
 
 type AdminStatsResponse = {
   total_documents: number;
@@ -47,7 +48,7 @@ export default function DashboardView() {
   };
 
   React.useEffect(() => {
-    const token = window.localStorage.getItem("access_token");
+    const token = getAccessToken();
     if (!token) {
       setStatsError("Missing token");
       return;
@@ -65,7 +66,7 @@ export default function DashboardView() {
   }, []);
 
   React.useEffect(() => {
-    const token = window.localStorage.getItem("access_token");
+    const token = getAccessToken();
     if (!token) return;
 
     let cancelled = false;

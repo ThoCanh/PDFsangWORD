@@ -14,6 +14,7 @@ import {
   Terminal,
   Users,
 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 
 import GlobalStyles from "./_ui/GlobalStyles";
 import SidebarItem from "./_ui/SidebarItem";
@@ -61,7 +62,7 @@ export default function AdminDashboard() {
   const [isAddPlanOpen, setIsAddPlanOpen] = React.useState(false);
   const [isAssignPackageOpen, setIsAssignPackageOpen] = React.useState(false);
 
-  const navItems: Array<{ key: ViewKey; label: string; icon: any }> = [
+  const navItems: Array<{ key: ViewKey; label: string; icon: LucideIcon }> = [
     { key: "dashboard", label: "Dashboard", icon: LayoutDashboard },
     { key: "users", label: "Users", icon: Users },
     { key: "plans", label: "Gói Pro", icon: CreditCard },

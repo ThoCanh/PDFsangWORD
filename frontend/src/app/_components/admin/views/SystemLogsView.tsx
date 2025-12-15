@@ -4,6 +4,7 @@ import React from "react";
 import { Search } from "lucide-react";
 import { LogLevelBadge } from "../_ui/Badges";
 import { BACKEND_URL } from "../../../_config/app";
+import { getAccessToken } from "../../auth/token";
 
 type ApiLogItem = {
   id: number;
@@ -28,7 +29,7 @@ type SystemStatus = {
   started_at: string | null;
   users_count: number;
   db_ok: boolean;
-  conversion: any;
+  conversion: unknown;
 };
 
 export default function SystemLogsView() {
@@ -59,7 +60,7 @@ export default function SystemLogsView() {
       setLoading(true);
       setError(null);
       try {
-        const token = window.localStorage.getItem("access_token");
+        const token = getAccessToken();
         const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
 
         const [statusRes, logsRes] = await Promise.all([
@@ -99,8 +100,10 @@ export default function SystemLogsView() {
           setStatus(statusJson);
           setLogs(mapped);
         }
-      } catch (e: any) {
-        if (!cancelled) setError(e?.message ?? "Không thể tải dữ liệu");
+      } catch (e: unknown) {
+        if (!cancelled) {
+          setError(e instanceof Error ? e.message : "Không thể tải dữ liệu");
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -160,7 +163,7 @@ export default function SystemLogsView() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Tìm theo service, message, user..."
-            className="w-full pl-9 pr-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+            className="w-full pl-9 pr-3 py-2 border border-slate-300 rounded-lg bg-white text-slate-900 placeholder:text-slate-400 focus:ring-2 focus:ring-indigo-500 outline-none"
           />
         </div>
 

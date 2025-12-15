@@ -7,12 +7,13 @@ export default function Page() {
   return (
     <AuthPage
       onNavigate={(view) => {
-        if (view === "home") router.replace("/");
-        else router.replace("/");
+        if (view === "home") router.push("/");
+        else router.push("/");
       }}
       onAuthSuccess={(role) => {
-        if (role === "admin") router.replace("/admin");
-        else router.replace("/dashboard");
+        // Admin is handled inside AuthPage (opens new tab + keeps this tab logged out)
+        if (role === "user") router.push("/dashboard");
+        else router.push("/");
       }}
     />
   );
