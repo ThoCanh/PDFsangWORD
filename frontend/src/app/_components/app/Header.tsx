@@ -37,7 +37,7 @@ export default function Header({
       <nav className="relative flex items-center justify-between px-4 sm:px-6 py-4">
         <div
           className="flex items-center gap-2 cursor-pointer"
-          onClick={() => router.replace("/")}
+          onClick={() => router.push("/")}
         >
           <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white font-bold text-xl">
             F
@@ -47,7 +47,7 @@ export default function Header({
 
         <div className="hidden md:flex items-center gap-8 text-sm font-medium text-slate-600 absolute left-1/2 -translate-x-1/2">
           <button
-            onClick={() => router.replace("/")}
+            onClick={() => router.push("/")}
             className={`hover:text-blue-600 transition-colors ${
               view === "home" ? "text-blue-600" : ""
             }`}
@@ -55,7 +55,7 @@ export default function Header({
             Trang chủ
           </button>
           <button
-            onClick={() => router.replace("/Tools")}
+            onClick={() => router.push("/Tools")}
             className={`hover:text-blue-600 transition-colors ${
               view === "tools" ? "text-blue-600" : ""
             }`}
@@ -63,7 +63,7 @@ export default function Header({
             Công cụ
           </button>
           <button
-            onClick={() => router.replace("/upgrade")}
+            onClick={() => router.push("/upgrade")}
             className={`hover:text-blue-600 transition-colors ${
               view === "pricing" ? "text-blue-600" : ""
             }`}
@@ -71,7 +71,7 @@ export default function Header({
             Giá cả
           </button>
           <button
-            onClick={() => router.replace("/introduce")}
+            onClick={() => router.push("/introduce")}
             className={`hover:text-blue-600 transition-colors ${
               view === "about" ? "text-blue-600" : ""
             }`}
@@ -94,12 +94,7 @@ export default function Header({
                   <button
                     onClick={() => {
                       setMenuOpen(false);
-                      // Navigate to appropriate page by role
-                      if (role === "admin") {
-                        router.replace("/admin");
-                      } else {
-                        router.replace("/");
-                      }
+                      router.push("/account");
                     }}
                     className="w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
                   >
@@ -120,14 +115,14 @@ export default function Header({
             </div>
           ) : (
             <button
-              onClick={() => router.replace("/login")}
+              onClick={() => router.push("/login")}
               className="px-4 py-2 text-sm font-medium border border-blue-200 text-blue-700 rounded-lg hover:bg-blue-50 active:scale-[0.98] active:shadow-inner transition duration-150 shadow-sm flex items-center gap-2"
             >
               Đăng nhập
             </button>
           )}
           <button
-            onClick={() => router.replace("/Tools")}
+            onClick={() => router.push("/Tools")}
             className="px-4 py-2 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-shadow shadow-md shadow-blue-200 flex items-center gap-2"
           >
             <Upload size={16} /> Tải lên tệp
@@ -147,7 +142,7 @@ export default function Header({
         <div className="md:hidden border-t border-gray-100 bg-white shadow-sm">
           <div className="px-4 py-3 flex flex-col gap-2 text-sm font-medium text-slate-700">
             <button
-              onClick={() => { setMenuOpen(false); router.replace("/"); }}
+              onClick={() => { setMenuOpen(false); router.push("/"); }}
               className={`flex justify-between items-center py-2 hover:text-blue-600 transition-colors ${
                 view === "home" ? "text-blue-600" : ""
               }`}
@@ -155,7 +150,7 @@ export default function Header({
               Trang chủ
             </button>
             <button
-              onClick={() => { setMenuOpen(false); router.replace("/Tools"); }}
+              onClick={() => { setMenuOpen(false); router.push("/Tools"); }}
               className={`flex justify-between items-center py-2 hover:text-blue-600 transition-colors ${
                 view === "tools" ? "text-blue-600" : ""
               }`}
@@ -163,7 +158,7 @@ export default function Header({
               Công cụ
             </button>
             <button
-              onClick={() => { setMenuOpen(false); router.replace("/upgrade"); }}
+              onClick={() => { setMenuOpen(false); router.push("/upgrade"); }}
               className={`flex justify-between items-center py-2 hover:text-blue-600 transition-colors ${
                 view === "pricing" ? "text-blue-600" : ""
               }`}
@@ -171,7 +166,7 @@ export default function Header({
               Giá cả
             </button>
             <button
-              onClick={() => { setMenuOpen(false); router.replace("/introduce"); }}
+              onClick={() => { setMenuOpen(false); router.push("/introduce"); }}
               className={`flex justify-between items-center py-2 hover:text-blue-600 transition-colors ${
                 view === "about" ? "text-blue-600" : ""
               }`}
@@ -193,11 +188,7 @@ export default function Header({
                         <button
                           onClick={() => {
                             setMenuOpen(false);
-                            if (role === "admin") {
-                              router.replace("/admin");
-                            } else {
-                              router.replace("/");
-                            }
+                            router.push("/account");
                           }}
                           className="w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
                         >
@@ -219,14 +210,14 @@ export default function Header({
                 </div>
               ) : (
                 <button
-                  onClick={() => { setMenuOpen(false); router.replace("/login"); }}
+                  onClick={() => { setMenuOpen(false); router.push("/login"); }}
                   className="w-full px-4 py-2 text-sm font-medium border border-blue-200 text-blue-700 rounded-lg hover:bg-blue-50 active:scale-[0.98] active:shadow-inner transition duration-150 shadow-sm flex items-center justify-center gap-2"
                 >
                   Đăng nhập
                 </button>
               )}
               <button
-                onClick={() => { setMenuOpen(false); router.replace("/Tools"); }}
+                onClick={() => { setMenuOpen(false); router.push("/Tools"); }}
                 className="w-full px-4 py-2 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-shadow shadow-md shadow-blue-200 flex items-center justify-center gap-2"
               >
                 <Upload size={16} /> Tải lên tệp
