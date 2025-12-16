@@ -24,6 +24,8 @@ router = APIRouter(
 class AssignPlanRequest(BaseModel):
     email: str
     plan_id: int
+    # Optional duration in months for assigned plan (null = indefinite)
+    duration_months: int | None = None
 
 class AssignPlanResponse(BaseModel):
     ok: bool
@@ -45,6 +47,8 @@ def assign_plan_to_user(payload: AssignPlanRequest, db: Session = Depends(get_db
     if not plan:
         return AssignPlanResponse(ok=False, error="Không tìm thấy gói với id này")
     user.plan_key = f"plan:{plan_id}"
+    user.plan_assigned_at = datetime.now(timezone.utc)
+    user.plan_duration_months = int(payload.duration_months) if payload.duration_months is not None else None
     db.add(user)
     db.commit()
     return AssignPlanResponse(ok=True, user_id=user.id, email=user.email, plan_key=user.plan_key)

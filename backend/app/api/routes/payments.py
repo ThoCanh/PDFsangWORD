@@ -90,6 +90,7 @@ class OrderResponse(BaseModel):
     status: str
 
     created_at: datetime
+    paid_at: datetime | None = None
     expires_at: datetime
 
     plan_id: int
@@ -99,6 +100,7 @@ class OrderResponse(BaseModel):
     subtotal_vnd: int
     discount_vnd: int
     total_vnd: int
+    billing_cycle: str | None = "month"
 
     transfer_content: str
     qr_image_url: str
@@ -121,19 +123,25 @@ def _compute_amounts(*, plan_price_vnd: int, quantity: int, promo_code: str | No
     return subtotal, discount, total
 
 
-def _as_order_response(order: PaymentOrder, plan_name: str) -> OrderResponse:
+def _as_order_response(order: PaymentOrder, plan_name: str, billing_cycle: str | None = "month") -> OrderResponse:
     created_at = order.created_at
     if created_at.tzinfo is None:
         created_at = created_at.replace(tzinfo=timezone.utc)
+
+    paid_at = order.paid_at
+    if paid_at and paid_at.tzinfo is None:
+        paid_at = paid_at.replace(tzinfo=timezone.utc)
 
     return OrderResponse(
         order_id=order.id,
         order_code=order.order_code,
         status=order.status,
         created_at=created_at,
+        paid_at=paid_at,
         expires_at=compute_order_expiry(created_at, minutes=3),
         plan_id=order.plan_id,
         plan_name=plan_name,
+        billing_cycle=billing_cycle,
         quantity=order.quantity,
         subtotal_vnd=order.subtotal_vnd,
         discount_vnd=order.discount_vnd,
@@ -202,7 +210,7 @@ def create_order(
     db.commit()
     db.refresh(order)
 
-    return _as_order_response(order, plan_name=plan.name)
+    return _as_order_response(order, plan_name=plan.name, billing_cycle=plan.billing_cycle)
 
 
 @router.put("/orders/{order_id}", response_model=OrderResponse)
@@ -242,7 +250,7 @@ def update_order(
     db.commit()
     db.refresh(order)
 
-    return _as_order_response(order, plan_name=plan.name)
+    return _as_order_response(order, plan_name=plan.name, billing_cycle=plan.billing_cycle)
 
 
 @router.get("/orders/{order_id}", response_model=OrderResponse)
@@ -259,7 +267,30 @@ def get_order(
     if not plan:
         raise HTTPException(status_code=404, detail="Plan not found")
 
-    return _as_order_response(order, plan_name=plan.name)
+    return _as_order_response(order, plan_name=plan.name, billing_cycle=plan.billing_cycle)
+
+
+@router.get("/my-orders", response_model=list[OrderResponse])
+def my_orders(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> list[OrderResponse]:
+    """Return all orders for the current user, newest first."""
+    orders = (
+        db.query(PaymentOrder)
+        .filter(PaymentOrder.user_id == current_user.id)
+        .order_by(PaymentOrder.created_at.desc())
+        .all()
+    )
+
+    out: list[OrderResponse] = []
+    for o in orders:
+        # Try to find billing_cycle from plans table; fallback to month.
+        plan = db.get(Plan, o.plan_id)
+        bc = plan.billing_cycle if plan else "month"
+        out.append(_as_order_response(o, plan_name=(o.plan_name or ""), billing_cycle=bc))
+
+    return out
 
 
 class SePayWebhookPayload(BaseModel):
@@ -393,6 +424,7 @@ def _process_sepay_webhook(*, request: Request, payload: SePayWebhookPayload, db
                 desired_key = f"plan:{order.plan_id}"
                 if getattr(user, "plan_key", "") != desired_key:
                     user.plan_key = desired_key
+                    user.plan_assigned_at = datetime.now(timezone.utc)
                     db.add(user)
 
         # Only mark mismatch while still pending; don't downgrade a paid order.

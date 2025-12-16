@@ -74,6 +74,31 @@ export default function PaymentPage({ planId }: Props) {
   const [order, setOrder] = useState<PaymentOrder | null>(null);
   const [orderLoading, setOrderLoading] = useState(false);
   const [orderError, setOrderError] = useState<string | null>(null);
+  const [qrLoaded, setQrLoaded] = useState(false);
+
+  const prevQrUrl = React.useRef<string | null>(null);
+
+  useEffect(() => {
+    // Reset qrLoaded when we're creating an order or when the QR URL changes.
+    if (orderLoading) {
+      setQrLoaded(false);
+      return;
+    }
+
+    const url = order?.qr_image_url ?? null;
+    if (url === null) {
+      setQrLoaded(true);
+      prevQrUrl.current = null;
+      return;
+    }
+
+    if (prevQrUrl.current !== url) {
+      // New QR URL -> mark as not loaded until image fires onLoad
+      prevQrUrl.current = url;
+      setQrLoaded(false);
+    }
+    // otherwise keep existing qrLoaded value (do not reset it)
+  }, [order?.qr_image_url, orderLoading]);
 
   const [awaitingPayment, setAwaitingPayment] = useState(false);
   const [remainingSec, setRemainingSec] = useState<number | null>(null);
@@ -694,6 +719,13 @@ export default function PaymentPage({ planId }: Props) {
 
             {/* Box QR Code */}
             <div className="bg-white p-6 rounded-2xl shadow-lg border border-blue-100 relative overflow-hidden">
+              {/* Loading overlay while QR image is being generated/loaded */}
+              {((orderLoading) || (order?.qr_image_url && !qrLoaded)) ? (
+                <div className="absolute inset-0 z-20 bg-white/70 backdrop-blur-sm flex items-center justify-center flex-col gap-3">
+                  <div className="inline-block w-10 h-10 rounded-full border-4 border-blue-200 border-t-blue-600 animate-spin" aria-hidden="true" />
+                  <div className="text-sm text-slate-700">Đợi xíu nhé đang tải QR........</div>
+                </div>
+              ) : null}
               <div className="absolute top-0 right-0 bg-blue-600 text-white text-xs font-bold px-3 py-1 rounded-bl-lg">
                 KHUYÊN DÙNG
               </div>
@@ -719,6 +751,8 @@ export default function PaymentPage({ planId }: Props) {
                         src={order.qr_image_url}
                         alt="SePay VietQR"
                         className="w-48 h-48 mix-blend-multiply mx-auto"
+                        onLoad={() => { setQrLoaded(true); console.log('QR image onLoad'); }}
+                        onError={() => { setQrLoaded(true); console.log('QR image onError'); }}
                       />
                     ) : (
                       <div className="w-48 h-48 flex items-center justify-center text-sm text-slate-500 text-center px-2">

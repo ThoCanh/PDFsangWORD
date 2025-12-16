@@ -50,6 +50,12 @@ def _init_db() -> None:
                 conn.execute(
                     text("ALTER TABLE users ADD COLUMN plan_key VARCHAR(64) NOT NULL DEFAULT 'free'")
                 )
+        if "plan_assigned_at" not in existing_cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE users ADD COLUMN plan_assigned_at TIMESTAMP WITH TIME ZONE NULL"))
+        if "plan_duration_months" not in existing_cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE users ADD COLUMN plan_duration_months INTEGER NULL"))
 
         plan_cols = {c.get("name") for c in inspector.get_columns("plans")}
         if "tools_json" not in plan_cols:

@@ -19,6 +19,10 @@ class User(Base):
     # Current plan key for the user. Keep it simple and stable for the frontend.
     # Examples: "free", "plan:12".
     plan_key: Mapped[str] = mapped_column(String(64), nullable=False, default="free")
+    # When plan_key was last assigned (either via purchase or admin assignment).
+    plan_assigned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Optional duration (months) when a plan is assigned by admin. Null means unspecified/indefinite.
+    plan_duration_months: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

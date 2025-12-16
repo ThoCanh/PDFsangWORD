@@ -137,6 +137,7 @@ export default function PricingPage({
             })();
             const isPaid = !isFree;
             const isUsingFree = !!email && !isContact && isFree && authPlanKey === "free";
+            const isCurrentPaid = !!email && !isContact && isPaid && authPlanKey === cardPlanKey;
 
             const cardClass = isPaid
               ? `bg-slate-900 text-white p-8 rounded-2xl shadow-xl relative overflow-hidden cursor-pointer transition ${
@@ -165,7 +166,9 @@ export default function PricingPage({
             const noTextClass = isPaid ? "text-slate-400" : "text-slate-400";
 
             const buttonClass = isPaid
-              ? "w-full py-3 bg-blue-600 hover:bg-blue-500 text-white font-semibold rounded-xl transition-colors shadow-lg shadow-blue-900/50"
+              ? isCurrentPaid
+                ? "w-full py-3 border border-slate-300 text-slate-400 font-semibold rounded-xl cursor-not-allowed"
+                : "w-full py-3 bg-blue-600 hover:bg-blue-500 text-white font-semibold rounded-xl transition-colors shadow-lg shadow-blue-900/50"
               : isUsingFree
                 ? "w-full py-3 border border-slate-300 text-slate-400 font-semibold rounded-xl cursor-not-allowed"
                 : "w-full py-3 border border-blue-600 text-blue-600 font-semibold rounded-xl hover:bg-blue-50 active:scale-[0.99] transition duration-150";
@@ -243,7 +246,9 @@ export default function PricingPage({
                       ? isUsingFree
                         ? "Đang sử dụng"
                         : "Bắt đầu miễn phí"
-                      : "Nâng cấp ngay"}
+                      : isCurrentPaid
+                        ? "Đang sử dụng"
+                        : "Nâng cấp ngay"}
                 </button>
               </div>
             );

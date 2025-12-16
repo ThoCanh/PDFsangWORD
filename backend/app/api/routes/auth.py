@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pydantic import BaseModel, EmailStr, Field
+from datetime import datetime
 from sqlalchemy.orm import Session
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -40,6 +41,8 @@ class MeResponse(BaseModel):
     email: EmailStr
     role: str
     plan_key: str
+    plan_assigned_at: datetime | None = None
+    plan_duration_months: int | None = None
 
 
 class UpdatePlanRequest(BaseModel):
@@ -90,6 +93,8 @@ def me(current_user: User = Depends(get_current_user)):
         email=current_user.email,
         role=current_user.role,
         plan_key=getattr(current_user, "plan_key", "free"),
+        plan_assigned_at=getattr(current_user, "plan_assigned_at", None),
+        plan_duration_months=getattr(current_user, "plan_duration_months", None),
     )
 
 

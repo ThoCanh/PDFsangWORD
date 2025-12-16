@@ -429,30 +429,18 @@ function SubscriptionTabDynamic({
               ? `bg-slate-900 text-white p-8 rounded-2xl shadow-xl relative overflow-hidden cursor-pointer transition ${
                   isSelected ? "ring-2 ring-blue-400 scale-[1.01]" : ""
                 }`
-              : `bg-white p-8 rounded-2xl border shadow-sm transition-all hover:shadow-md cursor-pointer ${
-                  isSelected
-                    ? "border-blue-500 shadow-lg shadow-blue-100 scale-[1.01]"
-                    : "border-slate-200"
+              : `bg-white rounded-2xl p-6 border border-slate-100 relative overflow-hidden cursor-pointer transition ${
+                  isSelected ? "ring-2 ring-blue-400 scale-[1.01]" : ""
                 }`;
 
-            const titleClass = isPaid
-              ? "text-lg font-medium text-blue-200 mb-2"
-              : "text-lg font-medium text-slate-700 mb-2";
-
-            const priceClass = isPaid
-              ? "text-4xl font-bold mb-6"
-              : "text-4xl font-bold text-slate-800 mb-6";
-
-            const priceUnitClass = "text-sm font-normal text-slate-400";
-
-            const okIconClass = isPaid ? "text-blue-400" : "text-green-500";
-            const okTextClass = isPaid ? "text-white" : "text-slate-600";
-
+            const titleClass = isPaid ? "text-xl font-semibold" : "text-lg font-semibold";
+            const priceClass = isPaid ? "text-3xl font-bold" : "text-xl font-semibold";
+            const priceUnitClass = "text-sm text-slate-400 ml-2";
+            const okTextClass = isPaid ? "text-slate-200" : "text-slate-600";
+            const okIconClass = isPaid ? "text-slate-200" : "text-slate-500";
             const buttonClass = isPaid
-              ? "w-full py-3 bg-blue-600 hover:bg-blue-500 text-white font-semibold rounded-xl transition-colors shadow-lg shadow-blue-900/50"
-              : isCurrent
-                ? "w-full py-3 border border-slate-300 text-slate-400 font-semibold rounded-xl cursor-not-allowed"
-                : "w-full py-3 border border-blue-600 text-blue-600 font-semibold rounded-xl hover:bg-blue-50 active:scale-[0.99] transition duration-150";
+              ? `absolute bottom-8 left-6 right-6 inline-flex items-center justify-center gap-2 rounded-lg text-sm font-semibold px-4 py-2 bg-blue-600 hover:bg-blue-700 transition ${isSelected ? "scale-[1.01] ring-2 ring-blue-400" : ""}`
+              : `w-full inline-flex items-center justify-center gap-2 rounded-lg text-sm font-semibold px-4 py-2 border border-slate-200 ${isSelected ? "ring-2 ring-blue-400" : "hover:bg-slate-50"}`;
 
             return (
               <div
@@ -506,50 +494,203 @@ function SubscriptionTabDynamic({
         </div>
       )}
 
-      <div className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
-        <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/50">
-          <h3 className="font-semibold text-slate-800">Lịch sử thanh toán</h3>
-        </div>
-        <div className="p-0 overflow-x-auto">
-          <table className="w-full text-sm text-left">
-            <thead className="text-xs text-slate-500 uppercase bg-slate-50">
-              <tr>
-                <th className="px-6 py-3">Ngày</th>
-                <th className="px-6 py-3">Mô tả</th>
-                <th className="px-6 py-3">Số tiền</th>
-                <th className="px-6 py-3">Trạng thái</th>
-                <th className="px-6 py-3">Hóa đơn</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr className="bg-white border-b hover:bg-slate-50">
-                <td className="px-6 py-4">01/10/2023</td>
-                <td className="px-6 py-4 font-medium text-slate-900">
-                  DocuFlowAI Pro (Monthly)
-                </td>
-                <td className="px-6 py-4">199.000đ</td>
-                <td className="px-6 py-4">
-                  <span className="bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded text-xs">
-                    Thành công
-                  </span>
-                </td>
-                <td className="px-6 py-4">
-                  <button className="text-blue-600 hover:text-blue-800" aria-label="Download invoice">
-                    <Download size={16} />
-                  </button>
-                </td>
-              </tr>
-              <tr className="bg-white">
-                <td
-                  colSpan={5}
-                  className="px-6 py-4 text-center text-slate-400 italic"
-                >
-                  Không có giao dịch nào khác.
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
+      <UsagePeriodInProfile />
+    </div>
+  );
+}
+
+function UsagePeriodInProfile() {
+  const { planKey } = useAuth();
+  const [planName, setPlanName] = useState<string | null>(null);
+  const [start, setStart] = useState<string | null>(null);
+  const [end, setEnd] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let mounted = true;
+    async function load() {
+      setLoading(true);
+      setError(null);
+      try {
+        let planId: number | null = null;
+        if (planKey && planKey.startsWith("plan:")) {
+          const id = Number(planKey.split(":", 2)[1]);
+          if (Number.isFinite(id)) planId = id;
+        }
+
+        // Resolve plan name
+        if (planId != null) {
+          try {
+            const res = await fetch(`${BACKEND_URL}/plans`);
+            if (res.ok) {
+              const list = await res.json();
+              const found = Array.isArray(list) ? list.find((p) => p.id === planId) : null;
+              if (mounted) setPlanName(found?.name ?? `Gói #${planId}`);
+            } else {
+              if (mounted) setPlanName(`Gói #${planId}`);
+            }
+          } catch {
+            if (mounted) setPlanName(`Gói #${planId}`);
+          }
+        } else {
+          if (!planKey || planKey === "free") {
+            if (mounted) setPlanName("Miễn phí");
+          } else {
+            if (mounted) setPlanName(planKey);
+          }
+        }
+
+        // Try to get auth/me to detect admin-assigned timestamp and optional duration
+        let planAssignedAt: string | null = null;
+        let planAssignedDuration: number | null = null;
+        try {
+          const token = getAccessToken();
+          if (token) {
+            const me = await fetch(`${BACKEND_URL}/auth/me`, {
+              headers: { Authorization: `Bearer ${token}` },
+            });
+            if (me.ok) {
+              const meJson = await me.json();
+              if (meJson.plan_assigned_at) planAssignedAt = meJson.plan_assigned_at;
+              if (typeof meJson.plan_duration_months === "number") planAssignedDuration = Number(meJson.plan_duration_months);
+            }
+          }
+        } catch {
+          // ignore
+        }
+
+        // Find latest paid order for this plan (if any)
+        try {
+          const token = getAccessToken();
+          const res = await fetch(`${BACKEND_URL}/payments/my-orders`, {
+            headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+          });
+          if (res.ok) {
+            const data = await res.json();
+            const paid = Array.isArray(data) ? data.filter((o) => o.status === "paid") : [];
+            paid.sort((a, b) => new Date(b.paid_at || b.created_at).getTime() - new Date(a.paid_at || a.created_at).getTime());
+            let foundOrder = null;
+            if (planId != null) {
+              foundOrder = paid.find((o) => o.plan_id === planId) ?? paid[0] ?? null;
+            } else {
+              foundOrder = paid[0] ?? null;
+            }
+
+            if (foundOrder && (foundOrder.paid_at || foundOrder.created_at)) {
+              // Use paid_at if present, otherwise fallback to created_at
+              const startDate = foundOrder.paid_at || foundOrder.created_at;
+              console.log('UsagePeriod foundOrder', foundOrder);
+              console.log('UsagePeriod startDate', startDate);
+              const dStart = new Date(startDate);
+              let dEnd: string | null = null;
+
+              // billing_cycle may be provided by backend; default to month
+              const cycle = (foundOrder.billing_cycle || "month").toLowerCase();
+              const qty = Math.max(1, Number(foundOrder.quantity || 1));
+
+              if (cycle === "lifetime") {
+                dEnd = "Trọn đời";
+              } else {
+                // compute end by adding months (qty or qty*12 for year)
+                const monthsToAdd = cycle === "year" ? qty * 12 : qty;
+                const y = dStart.getFullYear();
+                let m = dStart.getMonth() + 1 + monthsToAdd; // JS months 0-based
+                const day = dStart.getDate();
+                const newYear = y + Math.floor((m - 1) / 12);
+                m = ((m - 1) % 12) + 1;
+                // clamp day to last day of month
+                const tentative = new Date(newYear, m, 0); // day 0 -> last day prev month
+                const lastDay = tentative.getDate();
+                const finalDay = Math.min(day, lastDay);
+                dEnd = new Date(newYear, m - 1, finalDay).toLocaleDateString("vi-VN");
+                console.log('UsagePeriod computed dEnd', dEnd);
+              }
+
+              if (mounted) {
+                setStart(new Date(startDate).toLocaleDateString("vi-VN"));
+                setEnd(dEnd);
+              }
+            } else if (planAssignedAt) {
+              // No paid order; use admin assigned timestamp as start
+              if (mounted) {
+                const dStart = new Date(planAssignedAt);
+                let dEnd: string | null = null;
+
+                if (planAssignedDuration != null && Number.isFinite(planAssignedDuration)) {
+                  const monthsToAdd = Math.max(0, Math.floor(planAssignedDuration));
+                  const y = dStart.getFullYear();
+                  let m = dStart.getMonth() + 1 + monthsToAdd; // JS months 0-based
+                  const day = dStart.getDate();
+                  const newYear = y + Math.floor((m - 1) / 12);
+                  m = ((m - 1) % 12) + 1;
+                  const tentative = new Date(newYear, m, 0);
+                  const lastDay = tentative.getDate();
+                  const finalDay = Math.min(day, lastDay);
+                  dEnd = new Date(newYear, m - 1, finalDay).toLocaleDateString("vi-VN");
+                }
+
+                setStart(dStart.toLocaleDateString("vi-VN"));
+                setEnd(dEnd);
+              }
+            } else {
+              if (mounted) {
+                setStart(null);
+                setEnd(null);
+              }
+            }
+          } else {
+            // Couldn't fetch orders (unauthenticated or server error). We'll silently continue and show plan name without dates.
+            if (planAssignedAt && mounted) {
+              setStart(new Date(planAssignedAt).toLocaleDateString("vi-VN"));
+              setEnd(null);
+            } else if (mounted) {
+              setStart(null);
+              setEnd(null);
+            }
+          }
+        } catch (e) {
+          if (mounted) setError(e instanceof Error ? e.message : "Lỗi không xác định");
+        }
+      } catch (e) {
+        if (mounted) setError(e instanceof Error ? e.message : "Lỗi không xác định");
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    }
+
+    load();
+    return () => {
+      mounted = false;
+    };
+  }, [planKey]);
+
+  if (loading) return <div className="p-4 text-slate-500">Đang tải thời gian sử dụng…</div>;
+  if (error) return <div className="p-4 text-rose-600">{error}</div>;
+  if (!planName) return <div className="p-4 text-slate-400 italic">Chưa có gói sử dụng.</div>;
+
+  return (
+    <div className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
+      <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/50">
+        <h3 className="font-semibold text-slate-800">Thời gian sử dụng</h3>
+      </div>
+      <div className="p-0 overflow-x-auto">
+        <table className="w-full text-sm text-left">
+          <thead className="text-xs text-slate-500 uppercase bg-slate-50">
+            <tr>
+              <th className="px-6 py-3">Tên gói</th>
+              <th className="px-6 py-3">Ngày bắt đầu</th>
+              <th className="px-6 py-3">Ngày kết thúc</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr className="bg-white">
+              <td className="px-6 py-4 font-medium text-slate-900">{planName}</td>
+              <td className="px-6 py-4">{start ?? "—"}</td>
+              <td className="px-6 py-4">{end ?? "—"}</td>
+            </tr>
+          </tbody>
+        </table>
       </div>
     </div>
   );
