@@ -169,11 +169,6 @@ export function useConverter({
 
     try {
       const token = getAccessToken();
-      if (!token) {
-        setStatus("error");
-        setErrorMessage("Bạn cần đăng nhập để sử dụng chức năng này.");
-        return;
-      }
 
       const formData = new FormData();
       formData.append("file", file);
@@ -182,7 +177,11 @@ export function useConverter({
       const xhr = new XMLHttpRequest();
       xhr.open("POST", apiUrl, true);
       xhr.responseType = "blob";
-      xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+      if (token) {
+        xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+      } else {
+        // Anonymous conversion: proceed without Authorization header (Free plan by IP quota)
+      }
 
       xhr.upload.onprogress = (event) => {
         if (event.lengthComputable) {
