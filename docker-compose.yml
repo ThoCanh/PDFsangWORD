@@ -1,21 +1,55 @@
+version: '3.8'
+
 services:
-  backend:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
+  # 1. Database (PostgreSQL - Ổn định hơn SQLite trên Docker)
+  db:
+    image: postgres:15-alpine
+    container_name: docuflow_db
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=password
+      - POSTGRES_DB=docuflow
     ports:
-      - "8003:8000"
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  # 2. Backend (FastAPI + LibreOffice + OCR)
+  backend:
+    build: ./backend
+    container_name: docuflow_backend
+    ports:
+      - "8003:8000" # Cổng ngoài 8003
     env_file:
       - ./backend/.env
     environment:
-      # NOTE: Docker Desktop on Windows may not have IPv6 connectivity, which can break some hosted Postgres URLs.
-      # Use SQLite inside the container by default so the backend can start reliably.
-      - DATABASE_URL=sqlite:////data/docuflow.db
-      # For local dev, avoid CORS issues when accessing FE via localhost/lan IP.
-      - CORS_ORIGINS=*
+      # Kết nối DB Postgres (thay vì SQLite)
+      - DATABASE_URL=postgresql://postgres:password@db:5432/docuflow
+      # Đường dẫn LibreOffice trên Linux (Chỉ cần tên lệnh)
+      - LIBREOFFICE_PATH=soffice
+      # Cho phép Frontend gọi vào
+      - CORS_ORIGINS=http://localhost:3000
+    depends_on:
+      - db
     volumes:
-      - backend_data:/data
-    restart: unless-stopped
+      # Mount code để sửa code bên ngoài là bên trong tự cập nhật
+      - ./backend:/app
+
+  # 3. Frontend (Next.js)
+  frontend:
+    build: ./frontend
+    container_name: docuflow_frontend
+    ports:
+      - "3000:3000"
+    environment:
+      # API URL để Frontend gọi (Gọi từ trình duyệt người dùng nên dùng localhost)
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
+    depends_on:
+      - backend
+    volumes:
+      # Mount code để sửa giao diện cập nhật ngay (trừ node_modules)
+      - ./frontend:/app
+      - /app/node_modules
 
 volumes:
-  backend_data:
+  postgres_data:

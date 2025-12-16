@@ -81,7 +81,7 @@ def _pdf_text_len(pdf_path: Path, max_pages: int) -> int:
         return 0
 
 
-def convert_pdf_to_docx_pipeline(*, pdf_path: Path, work_dir: Path, prefer_ocr: bool = False) -> PdfToDocxResult:
+def convert_pdf_to_docx_pipeline(*, pdf_path: Path, work_dir: Path, prefer_tier_a: bool = False) -> PdfToDocxResult:
     """Professional PDF→DOCX pipeline.
 
     Tier A: Adobe PDF Services API (when configured), then Aspose.Words, then pdf2docx
@@ -110,14 +110,17 @@ def convert_pdf_to_docx_pipeline(*, pdf_path: Path, work_dir: Path, prefer_ocr: 
 
     adobe_enabled = bool(settings.adobe_client_id and settings.adobe_client_secret)
 
-    # If user requested 'prefer_ocr' and the PDF appears scanned, run OCR first so downstream
-    # Tier A providers receive a searchable PDF for best results.
-    if prefer_ocr and (not has_text) and settings.ocr_enabled:
+    # OCR-first flow: when operating in automatic mode (not explicit Tier A), the pipeline may choose
+    # to run OCR on scanned PDFs before calling Tier A providers to improve editable output.
+    # When the user explicitly selects Tier A (prefer_tier_a=True), we MUST NOT run server-side OCR
+    # (ocrmypdf/Tesseract) first — instead we send the original scanned PDF to Adobe so their Sensei AI
+    # performs OCR and preserves fonts/layout/stamps.
+    if (not prefer_tier_a) and (not has_text) and settings.ocr_enabled:
         ocrmypdf = which("ocrmypdf", settings.ocrmypdf_path)
         if not ocrmypdf:
-            # Explicitly fail so caller can inform admin to install OCR tools
+            # Explicitly fail so caller can inform admin to install OCR tools for the OCR-first path
             raise OcrUnavailableError(
-                "OCR chưa được cài đặt trên máy chủ. Vui lòng cài đặt ocrmypdf và Tesseract để sử dụng Tier A OCR-first."
+                "OCR chưa được cài đặt trên máy chủ. Vui lòng cài đặt ocrmypdf và Tesseract để sử dụng OCR-first khi cần."
             )
         try:
             ocr_out = work_dir / "ocr" / "searchable.pdf"

@@ -366,12 +366,12 @@ async def convert(
             if mode and mode.startswith("tier-a") and plan is None:
                 raise HTTPException(status_code=403, detail="Tier A conversion không áp dụng cho gói Free")
 
-            prefer_ocr = False
+            prefer_tier_a = False
             if mode and mode.startswith("tier-a"):
-                # User requested Tier A behavior: prefer OCR-first when the PDF appears scanned
-                prefer_ocr = True
+                # User requested Tier A: send original scan to Adobe (no server-side OCR/preprocessing)
+                prefer_tier_a = True
 
-            result = convert_pdf_to_docx_pipeline(pdf_path=in_pdf, work_dir=work_dir, prefer_ocr=prefer_ocr)
+            result = convert_pdf_to_docx_pipeline(pdf_path=in_pdf, work_dir=work_dir, prefer_tier_a=prefer_tier_a)
         except HTTPException as e:
             try:
                 job.status = "failed"

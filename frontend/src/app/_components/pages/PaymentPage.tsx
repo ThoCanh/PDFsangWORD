@@ -105,10 +105,10 @@ export default function PaymentPage({ planId }: Props) {
   const [orderExpiry, setOrderExpiry] = useState<{ orderId: number; expiresAtMs: number } | null>(null);
 
   const [bankInfo] = useState<BankInfo>({
-    bankName: "TPBank",
-    accountName: "CÔNG TY CỔ PHẦN DOCUFLOW AI",
-    accountNumber: "03456789999",
-    branch: "Hội sở chính",
+    bankName: "Vietcombank",
+    accountName: "PHAM HUU TOAN",
+    accountNumber: "",
+    branch: "",
   });
 
   const displayBankName = order?.bank?.trim() || bankInfo.bankName;

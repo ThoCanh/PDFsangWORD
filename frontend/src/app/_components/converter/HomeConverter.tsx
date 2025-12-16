@@ -439,15 +439,21 @@ export default function HomeConverter({ activeTool, onSelectTool }: Props) {
                     {(converter.file.size / 1024 / 1024).toFixed(2)} MB
                   </p>
 
-                  <div className="flex gap-3 w-full">
+                  <div className={
+                    (planKey && planKey.startsWith("plan:")) ? "flex gap-3 w-full" : "flex flex-col items-center gap-3 w-full"
+                  }>
                     <button
                       onClick={converter.removeFile}
-                      className="flex-1 py-3 border border-slate-200 text-slate-600 font-medium rounded-xl hover:bg-slate-50 transition-colors"
+                      className={
+                        (planKey && planKey.startsWith("plan:"))
+                          ? "flex-1 py-3 border border-slate-200 text-slate-600 font-medium rounded-xl hover:bg-slate-50 transition-colors"
+                          : "w-3/4 py-3 border border-slate-200 text-slate-600 font-medium rounded-xl hover:bg-slate-50 transition-colors"
+                      }
                     >
                       Hủy bỏ
                     </button>
-                    <div className="flex-1 flex items-center gap-3">
-                      {activeTool === "pdf-word" && (
+                    <div className={(planKey && planKey.startsWith("plan:")) ? "flex-1 flex items-center gap-3" : "w-full flex flex-col items-center gap-3"}>
+                      {activeTool === "pdf-word" && (planKey && planKey.startsWith("plan:")) && (
                         <div className="text-sm text-slate-700">
                           <label className="mr-2">Chế độ:</label>
                           <select
@@ -456,7 +462,7 @@ export default function HomeConverter({ activeTool, onSelectTool }: Props) {
                             className="px-2 py-1 border rounded"
                           >
                             <option value="auto">Tự động</option>
-                            <option value="tier-a">Tier A (OCR nếu là scan) — Premium</option>
+                            <option value="tier-a">Tier A (Gửi scan gốc cho Adobe — giữ font, layout, con dấu) — Premium</option>
                           </select>
                         </div>
                       )}
@@ -469,7 +475,7 @@ export default function HomeConverter({ activeTool, onSelectTool }: Props) {
                           });
                         }}
                         disabled={!isToolAllowed(activeTool)}
-                        className={`flex-1 py-3 text-white font-medium rounded-xl shadow-lg transition-all flex items-center justify-center gap-2 ${primaryButtonClass(
+                        className={`${(planKey && planKey.startsWith("plan:")) ? 'flex-1' : 'w-3/4'} py-3 text-white font-medium rounded-xl shadow-lg transition-all flex items-center justify-center gap-2 ${primaryButtonClass(
                           activeTool
                         )}`}
                       >
