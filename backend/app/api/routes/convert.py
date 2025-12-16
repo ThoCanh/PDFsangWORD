@@ -211,6 +211,7 @@ async def convert(
     request: Request,
     file: UploadFile = File(...),
     type: str = Form(...),
+    mode: str | None = Form(None),
     current_user: User | None = Depends(get_optional_user),
     db: Session = Depends(get_db),
 ):
@@ -361,7 +362,16 @@ async def convert(
             db.rollback()
 
         try:
-            result = convert_pdf_to_docx_pipeline(pdf_path=in_pdf, work_dir=work_dir)
+            # Enforce mode restrictions: Tier A is premium and not available for Free plan
+            if mode and mode.startswith("tier-a") and plan is None:
+                raise HTTPException(status_code=403, detail="Tier A conversion không áp dụng cho gói Free")
+
+            prefer_ocr = False
+            if mode and mode.startswith("tier-a"):
+                # User requested Tier A behavior: prefer OCR-first when the PDF appears scanned
+                prefer_ocr = True
+
+            result = convert_pdf_to_docx_pipeline(pdf_path=in_pdf, work_dir=work_dir, prefer_ocr=prefer_ocr)
         except HTTPException as e:
             try:
                 job.status = "failed"
@@ -394,6 +404,10 @@ async def convert(
                 db.commit()
             except Exception:
                 db.rollback()
+            # If OCR toolchain is unavailable, surface as 503 so admin can act
+            from ...services.pdf.pipeline import OcrUnavailableError
+            if isinstance(e, OcrUnavailableError):
+                raise HTTPException(status_code=503, detail=str(e)) from e
             raise HTTPException(status_code=500, detail=str(e)) from e
 
         try:

@@ -156,7 +156,7 @@ export function useConverter({
     }, 200);
   }, []);
 
-  const handleConvert = useCallback(async () => {
+  const handleConvert = useCallback(async (mode?: string) => {
     if (!file) return;
 
     setStatus("uploading");
@@ -173,6 +173,7 @@ export function useConverter({
       const formData = new FormData();
       formData.append("file", file);
       formData.append("type", activeTool);
+      if (mode) formData.append("mode", mode);
 
       const xhr = new XMLHttpRequest();
       xhr.open("POST", apiUrl, true);
@@ -229,6 +230,23 @@ export function useConverter({
                 .catch(() => setGateBlocked({ status: statusCode, detail: fallback }));
             } else {
               setGateBlocked({ status: statusCode, detail: fallback });
+            }
+            return;
+          }
+
+          // Specific handling for service-unavailable (OCR missing)
+          if (statusCode === 503) {
+            setStatus("error");
+            const resp = this.response as unknown;
+            if (resp instanceof Blob) {
+              resp
+                .text()
+                .then((t) => {
+                  setErrorMessage(t || fallback);
+                })
+                .catch(() => setErrorMessage(fallback));
+            } else {
+              setErrorMessage(fallback);
             }
             return;
           }

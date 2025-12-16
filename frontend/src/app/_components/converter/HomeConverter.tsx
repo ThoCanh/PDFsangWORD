@@ -72,6 +72,24 @@ export default function HomeConverter({ activeTool, onSelectTool }: Props) {
 
   const ai = useGeminiAssistant({ file: converter.file, apiKey: GEMINI_API_KEY });
 
+  const [conversionMode, setConversionMode] = React.useState<string>("auto");
+  const [canUseTierA, setCanUseTierA] = React.useState<boolean>(false);
+
+  React.useEffect(() => {
+    const token = getAccessToken();
+    if (!token) return;
+    (async () => {
+      try {
+        const res = await fetch(`${BACKEND_URL}/auth/me`, { headers: { Authorization: `Bearer ${token}` } });
+        if (!res.ok) return;
+        const data = await res.json();
+        if ((data?.plan_key || "").toString().startsWith("plan:")) setCanUseTierA(true);
+      } catch {
+        /* ignore */
+      }
+    })();
+  }, []);
+
   useEffect(() => {
     // Reset AI when file changes
     ai.setAiResult("");
@@ -428,20 +446,36 @@ export default function HomeConverter({ activeTool, onSelectTool }: Props) {
                     >
                       Hủy bỏ
                     </button>
-                    <button
-                      onClick={() => {
-                        void ensureAllowed(activeTool).then((ok) => {
-                          if (!ok) return;
-                          void converter.handleConvert();
-                        });
-                      }}
-                      disabled={!isToolAllowed(activeTool)}
-                      className={`flex-1 py-3 text-white font-medium rounded-xl shadow-lg transition-all flex items-center justify-center gap-2 ${primaryButtonClass(
-                        activeTool
-                      )}`}
-                    >
-                      Chuyển đổi <ChevronRight size={18} />
-                    </button>
+                    <div className="flex-1 flex items-center gap-3">
+                      {activeTool === "pdf-word" && (
+                        <div className="text-sm text-slate-700">
+                          <label className="mr-2">Chế độ:</label>
+                          <select
+                            value={conversionMode}
+                            onChange={(e) => setConversionMode(e.target.value)}
+                            className="px-2 py-1 border rounded"
+                          >
+                            <option value="auto">Tự động</option>
+                            <option value="tier-a">Tier A (OCR nếu là scan) — Premium</option>
+                          </select>
+                        </div>
+                      )}
+
+                      <button
+                        onClick={() => {
+                          void ensureAllowed(activeTool).then((ok) => {
+                            if (!ok) return;
+                            void converter.handleConvert(conversionMode === "auto" ? undefined : conversionMode);
+                          });
+                        }}
+                        disabled={!isToolAllowed(activeTool)}
+                        className={`flex-1 py-3 text-white font-medium rounded-xl shadow-lg transition-all flex items-center justify-center gap-2 ${primaryButtonClass(
+                          activeTool
+                        )}`}
+                      >
+                        Chuyển đổi <ChevronRight size={18} />
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>

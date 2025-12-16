@@ -29,6 +29,11 @@ class EditableConversionUnavailable(RuntimeError):
     pass
 
 
+class OcrUnavailableError(RuntimeError):
+    """Raised when OCR is requested but OCR toolchain is not available on the server."""
+    pass
+
+
 def _docx_text_len(docx_path: Path) -> int:
     try:
         from docx import Document
@@ -76,7 +81,7 @@ def _pdf_text_len(pdf_path: Path, max_pages: int) -> int:
         return 0
 
 
-def convert_pdf_to_docx_pipeline(*, pdf_path: Path, work_dir: Path) -> PdfToDocxResult:
+def convert_pdf_to_docx_pipeline(*, pdf_path: Path, work_dir: Path, prefer_ocr: bool = False) -> PdfToDocxResult:
     """Professional PDF→DOCX pipeline.
 
     Tier A: Adobe PDF Services API (when configured), then Aspose.Words, then pdf2docx
@@ -104,6 +109,32 @@ def convert_pdf_to_docx_pipeline(*, pdf_path: Path, work_dir: Path) -> PdfToDocx
     fallback_error: str | None = None
 
     adobe_enabled = bool(settings.adobe_client_id and settings.adobe_client_secret)
+
+    # If user requested 'prefer_ocr' and the PDF appears scanned, run OCR first so downstream
+    # Tier A providers receive a searchable PDF for best results.
+    if prefer_ocr and (not has_text) and settings.ocr_enabled:
+        ocrmypdf = which("ocrmypdf", settings.ocrmypdf_path)
+        if not ocrmypdf:
+            # Explicitly fail so caller can inform admin to install OCR tools
+            raise OcrUnavailableError(
+                "OCR chưa được cài đặt trên máy chủ. Vui lòng cài đặt ocrmypdf và Tesseract để sử dụng Tier A OCR-first."
+            )
+        try:
+            ocr_out = work_dir / "ocr" / "searchable.pdf"
+            run_ocrmypdf(
+                input_pdf=pdf_path,
+                output_pdf=ocr_out,
+                ocrmypdf_path=ocrmypdf,
+                lang=settings.ocr_lang,
+                timeout_sec=settings.ocr_timeout_sec,
+                extra_path=settings.tesseract_path,
+            )
+            # Use OCRed PDF for subsequent Tier A conversions
+            pdf_path = ocr_out
+            has_text = True
+        except Exception as e:
+            # Surface OCR failure explicitly
+            raise OcrUnavailableError(f"OCR failed: {e}") from e
 
     # Tier A (Adobe PDF Services API preferred when configured)
     if adobe_enabled:
