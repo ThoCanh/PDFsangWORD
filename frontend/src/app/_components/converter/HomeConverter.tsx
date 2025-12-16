@@ -15,6 +15,7 @@ import {
   Upload,
 } from "lucide-react";
 import { IS_DEMO_MODE, API_URL, GEMINI_API_KEY, BACKEND_URL } from "../../_config/app";
+import ConversionModePanel from "./ConversionModePanel";
 import { TOOL_CONFIG, type ToolKey } from "../../_config/tools";
 import { useConverter } from "../../_hooks/useConverter";
 import { useGeminiAssistant } from "../../_hooks/useGeminiAssistant";
@@ -50,6 +51,8 @@ export default function HomeConverter({ activeTool, onSelectTool }: Props) {
   const { planKey } = useAuth();
   const currentConfig = useMemo(() => TOOL_CONFIG[activeTool], [activeTool]);
 
+  const [panelOpen, setPanelOpen] = React.useState(false);
+
   const [gateOpen, setGateOpen] = React.useState(false);
   const [gateTitle, setGateTitle] = React.useState("Giới hạn gói cước");
   const [gateMessage, setGateMessage] = React.useState(
@@ -78,6 +81,7 @@ export default function HomeConverter({ activeTool, onSelectTool }: Props) {
   React.useEffect(() => {
     const token = getAccessToken();
     if (!token) return;
+
     (async () => {
       try {
         const res = await fetch(`${BACKEND_URL}/auth/me`, { headers: { Authorization: `Bearer ${token}` } });
@@ -89,6 +93,13 @@ export default function HomeConverter({ activeTool, onSelectTool }: Props) {
       }
     })();
   }, []);
+
+  // If user is paid and conversionMode is still 'auto', default auto -> tier-a per request
+  React.useEffect(() => {
+    if (planKey && planKey.startsWith("plan:") && conversionMode === "auto") {
+      setConversionMode("tier-a");
+    }
+  }, [planKey, conversionMode]);
 
   useEffect(() => {
     // Reset AI when file changes
@@ -454,16 +465,14 @@ export default function HomeConverter({ activeTool, onSelectTool }: Props) {
                     </button>
                     <div className={(planKey && planKey.startsWith("plan:")) ? "flex-1 flex items-center gap-3" : "w-full flex flex-col items-center gap-3"}>
                       {activeTool === "pdf-word" && (planKey && planKey.startsWith("plan:")) && (
-                        <div className="text-sm text-slate-700">
-                          <label className="mr-2">Chế độ:</label>
-                          <select
-                            value={conversionMode}
-                            onChange={(e) => setConversionMode(e.target.value)}
-                            className="px-2 py-1 border rounded"
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => setPanelOpen(true)}
+                            className="px-3 py-1 bg-slate-100 text-slate-700 rounded border hover:bg-slate-200 transition"
+                            type="button"
                           >
-                            <option value="auto">Tự động</option>
-                            <option value="tier-a">Tier A (Gửi scan gốc cho Adobe — giữ font, layout, con dấu) — Premium</option>
-                          </select>
+                            Chọn chế độ: <span className="ml-2 font-medium">{conversionMode === "tier-a" ? "Chế độ chuyển đổi: tier-a" : conversionMode === "ocr" ? "Chế độ chuyển PDF(SCAN) sang Word văn bản" : "Chế độ chuyển đổi: tier-a"}</span>
+                          </button>
                         </div>
                       )}
 
@@ -650,6 +659,14 @@ export default function HomeConverter({ activeTool, onSelectTool }: Props) {
           </div>
         </div>
       </div>
+
+      {/* Conversion mode panel (only visible when paid users open it) */}
+      <ConversionModePanel
+        visible={panelOpen}
+        onClose={() => setPanelOpen(false)}
+        onSelect={(m) => setConversionMode(m)}
+        initial={conversionMode as any}
+      />
 
       <UpgradePlanNotification
         isOpen={gateOpen}

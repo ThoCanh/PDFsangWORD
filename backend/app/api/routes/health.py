@@ -46,6 +46,21 @@ def conversion_health():
     except Exception:  # noqa: BLE001
         httpx_available = False
 
+
+    # Ghostscript (gs) is required by ocrmypdf on Windows and for PDF raster ops
+    gs = which("gs") or which("gswin64c") or which("gswin32c")
+    tesseract = which("tesseract", settings.tesseract_path)
+
+    ocr_available = bool(ocrmypdf and tesseract and gs)
+
+    ocr_hints = []
+    if not ocrmypdf:
+        ocr_hints.append("ocrmypdf not found on PATH. Install via Chocolatey: 'choco install ocrmypdf' or pip in the backend venv")
+    if not tesseract:
+        ocr_hints.append("Tesseract not found on PATH. On Windows: 'choco install tesseract' or install from UB Mannheim and set TESSERACT_PATH/TESSDATA_PREFIX")
+    if not gs:
+        ocr_hints.append("Ghostscript (gs) not found on PATH. On Windows: 'choco install ghostscript' or install from https://www.ghostscript.com/download/gsdnld.html")
+
     return {
         "prefer_editable": settings.prefer_editable,
         "adobe_pdf_services": {
@@ -70,6 +85,9 @@ def conversion_health():
             "enabled": settings.ocr_enabled,
             "lang": settings.ocr_lang,
             "resolved_ocrmypdf": ocrmypdf,
-            "available": bool(ocrmypdf),
+            "resolved_tesseract": tesseract,
+            "resolved_ghostscript": gs,
+            "available": ocr_available,
+            "hints": ocr_hints,
         },
     }

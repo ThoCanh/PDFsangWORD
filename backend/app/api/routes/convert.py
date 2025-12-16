@@ -363,15 +363,25 @@ async def convert(
 
         try:
             # Enforce mode restrictions: Tier A is premium and not available for Free plan
+            # Mode gating: Tier A and OCR modes are Premium-only
             if mode and mode.startswith("tier-a") and plan is None:
                 raise HTTPException(status_code=403, detail="Tier A conversion không áp dụng cho gói Free")
+            if mode == "ocr" and plan is None:
+                raise HTTPException(status_code=403, detail="Chế độ OCR chỉ áp dụng cho tài khoản Premium")
+            # OCR-first mode expects Adobe to be available to perform layout-preserving conversion.
+            if mode == "ocr" and not bool(settings.adobe_client_id and settings.adobe_client_secret):
+                raise HTTPException(status_code=503, detail="Chế độ OCR yêu cầu Adobe PDF Services được cấu hình trên server")
 
             prefer_tier_a = False
+            force_ocr = False
             if mode and mode.startswith("tier-a"):
                 # User requested Tier A: send original scan to Adobe (no server-side OCR/preprocessing)
                 prefer_tier_a = True
+            if mode == "ocr":
+                # User explicitly requested OCR-first local processing
+                force_ocr = True
 
-            result = convert_pdf_to_docx_pipeline(pdf_path=in_pdf, work_dir=work_dir, prefer_tier_a=prefer_tier_a)
+            result = convert_pdf_to_docx_pipeline(pdf_path=in_pdf, work_dir=work_dir, prefer_tier_a=prefer_tier_a, force_ocr=force_ocr)
         except HTTPException as e:
             try:
                 job.status = "failed"

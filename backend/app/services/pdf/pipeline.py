@@ -61,6 +61,26 @@ def _docx_space_ratio(docx_path: Path) -> float:
         return 0.0
 
 
+def _docx_looks_mojibake(docx_path: Path) -> bool:
+    try:
+        from docx import Document
+
+        d = Document(str(docx_path))
+        text = "\n".join((p.text or "") for p in d.paragraphs)
+        # Simple heuristics: presence of replacement chars or common mojibake markers
+        if "\ufffd" in text:
+            return True
+        # Common UTF-8 mis-decode artifacts for Vietnamese can contain 'Ã' sequences
+        if "Ã" in text:
+            return True
+        # Some PDFs yield odd sequences like 'D<' from font mapping issues
+        if "<" in text and any(c.isalpha() for c in text.split("<")[0][-2:]):
+            return True
+        return False
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def _pdf_text_len(pdf_path: Path, max_pages: int) -> int:
     try:
         import fitz  # PyMuPDF
@@ -81,7 +101,7 @@ def _pdf_text_len(pdf_path: Path, max_pages: int) -> int:
         return 0
 
 
-def convert_pdf_to_docx_pipeline(*, pdf_path: Path, work_dir: Path, prefer_tier_a: bool = False) -> PdfToDocxResult:
+def convert_pdf_to_docx_pipeline(*, pdf_path: Path, work_dir: Path, prefer_tier_a: bool = False, force_ocr: bool = False) -> PdfToDocxResult:
     """Professional PDF→DOCX pipeline.
 
     Tier A: Adobe PDF Services API (when configured), then Aspose.Words, then pdf2docx
@@ -110,12 +130,11 @@ def convert_pdf_to_docx_pipeline(*, pdf_path: Path, work_dir: Path, prefer_tier_
 
     adobe_enabled = bool(settings.adobe_client_id and settings.adobe_client_secret)
 
-    # OCR-first flow: when operating in automatic mode (not explicit Tier A), the pipeline may choose
-    # to run OCR on scanned PDFs before calling Tier A providers to improve editable output.
-    # When the user explicitly selects Tier A (prefer_tier_a=True), we MUST NOT run server-side OCR
-    # (ocrmypdf/Tesseract) first — instead we send the original scanned PDF to Adobe so their Sensei AI
-    # performs OCR and preserves fonts/layout/stamps.
-    if (not prefer_tier_a) and (not has_text) and settings.ocr_enabled:
+    # OCR-first flow: run OCR when explicitly requested (force_ocr) or when in auto mode the
+    # PDF appears scanned and prefer_tier_a is not set. OCR is performed locally via OCRmyPDF + Tesseract
+    # and will produce a searchable PDF. We intentionally avoid image cleaning or aggressive processing
+    # so stamps/con dấu remain intact (we do NOT use --clean).
+    if (force_ocr or ((not prefer_tier_a) and (not has_text))) and settings.ocr_enabled:
         ocrmypdf = which("ocrmypdf", settings.ocrmypdf_path)
         if not ocrmypdf:
             # Explicitly fail so caller can inform admin to install OCR tools for the OCR-first path
@@ -124,6 +143,7 @@ def convert_pdf_to_docx_pipeline(*, pdf_path: Path, work_dir: Path, prefer_tier_
             )
         try:
             ocr_out = work_dir / "ocr" / "searchable.pdf"
+            # Use OCRmyPDF to create a searchable PDF while preserving original images/graphics
             run_ocrmypdf(
                 input_pdf=pdf_path,
                 output_pdf=ocr_out,
@@ -161,7 +181,9 @@ def convert_pdf_to_docx_pipeline(*, pdf_path: Path, work_dir: Path, prefer_tier_
                 ocr_lang = settings.adobe_ocr_lang
 
             docx_path, mode = _run_adobe(ocr_lang=ocr_lang)
-
+            # If we explicitly ran OCR locally (force_ocr), prefer to mark the mode as "tier-a-ocr"
+            if force_ocr:
+                mode = "tier-a-ocr"
             # If we did NOT OCR (because PDF appeared to have text), but the resulting
             # DOCX still looks like it has no spaces, retry once with Adobe OCR.
             if has_text and settings.ocr_enabled:
@@ -176,6 +198,13 @@ def convert_pdf_to_docx_pipeline(*, pdf_path: Path, work_dir: Path, prefer_tier_
                 normalize_docx_page_breaks(docx_path=adobe_result_docx, aggressive=False)
             except DocxPostprocessError as e:
                 postprocess_error = str(e)
+
+            # If we forced local OCR before sending to Adobe, detect any mojibake patterns
+            # that indicate encoding/ocr problems and fail rather than returning a broken DOCX.
+            if force_ocr and _docx_looks_mojibake(adobe_result_docx):
+                raise EditableConversionUnavailable(
+                    "Sau khi OCR cục bộ (local) -> Adobe, kết quả chứa dấu hiệu Mojibake (lỗi font). Hãy kiểm tra rằng Tesseract đã sử dụng ngôn ngữ Tiếng Việt và thử lại."
+                )
 
             # Missing-content guard for text-layer PDFs
             if has_text:
