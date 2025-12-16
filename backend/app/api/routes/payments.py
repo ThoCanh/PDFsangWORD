@@ -14,8 +14,12 @@ from sqlalchemy.orm import Session
 from ..deps import get_current_user, get_db
 from ...core.config import settings
 from ...db.models import PaymentOrder, PaymentTransaction, Plan, User
+from ._payment_utils import compute_order_expiry
 
 router = APIRouter(prefix="/payments", tags=["payments"])
+
+# Alias endpoint to match common configurations like: /api/sepay-webhook
+sepay_alias_router = APIRouter(tags=["payments"])
 
 
 def _generate_order_code() -> str:
@@ -85,6 +89,9 @@ class OrderResponse(BaseModel):
     order_code: str
     status: str
 
+    created_at: datetime
+    expires_at: datetime
+
     plan_id: int
     plan_name: str
 
@@ -115,10 +122,16 @@ def _compute_amounts(*, plan_price_vnd: int, quantity: int, promo_code: str | No
 
 
 def _as_order_response(order: PaymentOrder, plan_name: str) -> OrderResponse:
+    created_at = order.created_at
+    if created_at.tzinfo is None:
+        created_at = created_at.replace(tzinfo=timezone.utc)
+
     return OrderResponse(
         order_id=order.id,
         order_code=order.order_code,
         status=order.status,
+        created_at=created_at,
+        expires_at=compute_order_expiry(created_at, minutes=3),
         plan_id=order.plan_id,
         plan_name=plan_name,
         quantity=order.quantity,
@@ -229,6 +242,23 @@ def update_order(
     return _as_order_response(order, plan_name=plan.name)
 
 
+@router.get("/orders/{order_id}", response_model=OrderResponse)
+def get_order(
+    order_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> OrderResponse:
+    order = db.get(PaymentOrder, order_id)
+    if not order or order.user_id != current_user.id:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    plan = db.get(Plan, order.plan_id)
+    if not plan:
+        raise HTTPException(status_code=404, detail="Plan not found")
+
+    return _as_order_response(order, plan_name=plan.name)
+
+
 class SePayWebhookPayload(BaseModel):
     """Schema for SePay webhook payload.
 
@@ -298,6 +328,10 @@ async def sepay_webhook(
     payload: SePayWebhookPayload,
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
+    return _process_sepay_webhook(request=request, payload=payload, db=db)
+
+
+def _process_sepay_webhook(*, request: Request, payload: SePayWebhookPayload, db: Session) -> dict[str, Any]:
     _require_webhook_secret(request)
 
     provider_tx_id = _extract_provider_tx_id(payload)
@@ -363,3 +397,26 @@ async def sepay_webhook(
         "order_code": order_code,
         "order_status": order.status if order else None,
     }
+
+
+@sepay_alias_router.post("/api/sepay-webhook")
+async def sepay_webhook_alias(request: Request, db: Session = Depends(get_db)) -> dict[str, Any]:
+    """Alias for SePay webhook.
+
+    Supports both JSON and x-www-form-urlencoded payloads.
+    """
+
+    data: dict[str, Any] = {}
+    try:
+        data = await request.json()
+        if not isinstance(data, dict):
+            data = {}
+    except Exception:
+        try:
+            form = await request.form()
+            data = dict(form)
+        except Exception:
+            data = {}
+
+    payload = SePayWebhookPayload.model_validate(data)
+    return _process_sepay_webhook(request=request, payload=payload, db=db)

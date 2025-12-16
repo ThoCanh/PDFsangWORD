@@ -26,6 +26,9 @@ type PaymentOrder = {
   order_id: number;
   order_code: string;
   status: string;
+
+  created_at: string;
+  expires_at: string;
   plan_id: number;
   plan_name: string;
   quantity: number;
@@ -68,6 +71,10 @@ export default function PaymentPage({ planId }: Props) {
   const [order, setOrder] = useState<PaymentOrder | null>(null);
   const [orderLoading, setOrderLoading] = useState(false);
   const [orderError, setOrderError] = useState<string | null>(null);
+
+  const [awaitingPayment, setAwaitingPayment] = useState(false);
+  const [remainingSec, setRemainingSec] = useState<number | null>(null);
+  const [orderExpiry, setOrderExpiry] = useState<{ orderId: number; expiresAtMs: number } | null>(null);
 
   const [bankInfo] = useState<BankInfo>({
     bankName: "TPBank",
@@ -215,6 +222,85 @@ export default function PaymentPage({ planId }: Props) {
     return "";
   }, [order]);
 
+  const paymentBanner = useMemo(() => {
+    if (!order) return null;
+    if (order.status === "paid") {
+      return {
+        text: "Đã thanh toán thành công",
+        className: "bg-emerald-50 border-emerald-200 text-emerald-800",
+        showSpinner: false,
+      };
+    }
+
+    if (awaitingPayment) {
+      return {
+        text: "Đang đợi thanh toán",
+        className: "bg-amber-50 border-amber-200 text-amber-900",
+        showSpinner: true,
+      };
+    }
+
+    return null;
+  }, [awaitingPayment, order]);
+
+  const expiryLabel = useMemo(() => {
+    if (!order || remainingSec == null) return null;
+    const mm = String(Math.floor(remainingSec / 60)).padStart(2, "0");
+    const ss = String(remainingSec % 60).padStart(2, "0");
+    return `${mm}:${ss}`;
+  }, [order, remainingSec]);
+
+  useEffect(() => {
+    if (!order || order.status === "paid") {
+      setOrderExpiry(null);
+      setRemainingSec(null);
+      return;
+    }
+
+    const parsed = Number.isFinite(Date.parse(order.expires_at)) ? Date.parse(order.expires_at) : NaN;
+    if (Number.isFinite(parsed)) {
+      setOrderExpiry({ orderId: order.order_id, expiresAtMs: parsed });
+      return;
+    }
+
+    // Fallback: if backend doesn't provide expires_at yet, assume 3 minutes from now
+    // (and keep it stable per orderId).
+    setOrderExpiry((prev) => {
+      if (prev && prev.orderId === order.order_id) return prev;
+      return { orderId: order.order_id, expiresAtMs: Date.now() + 3 * 60 * 1000 };
+    });
+  }, [order?.order_id, order?.expires_at, order?.status]);
+
+  useEffect(() => {
+    if (!order || order.status === "paid") {
+      setRemainingSec(null);
+      return;
+    }
+
+    const expiresAtMs = orderExpiry?.expiresAtMs;
+    if (!expiresAtMs || !Number.isFinite(expiresAtMs)) {
+      setRemainingSec(null);
+      return;
+    }
+
+    let cancelled = false;
+    const tick = () => {
+      const now = Date.now();
+      const sec = Math.max(0, Math.ceil((expiresAtMs - now) / 1000));
+      if (!cancelled) setRemainingSec(sec);
+      if (sec <= 0 && !cancelled) {
+        router.push("/upgrade");
+      }
+    };
+
+    tick();
+    const t = window.setInterval(tick, 1000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(t);
+    };
+  }, [order?.order_id, order?.status, orderExpiry?.expiresAtMs, router]);
+
   useEffect(() => {
     if (!selectedPlan) return;
 
@@ -266,6 +352,49 @@ export default function PaymentPage({ planId }: Props) {
       cancelled = true;
     };
   }, [selectedPlan]);
+
+  useEffect(() => {
+    if (!order) return;
+    if (order.status === "paid") return;
+    if (!awaitingPayment) return;
+
+    const orderId = order.order_id;
+
+    let cancelled = false;
+    const intervalMs = 3000;
+
+    async function poll() {
+      try {
+        const token = getAccessToken();
+        if (!token) return;
+
+        const res = await fetch(`${BACKEND_URL}/payments/orders/${orderId}`, {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
+        if (!res.ok) return;
+
+        const data = (await res.json()) as PaymentOrder;
+        if (!cancelled) setOrder(data);
+      } catch {
+        // ignore polling errors
+      }
+    }
+
+    const t = window.setInterval(() => {
+      void poll();
+    }, intervalMs);
+
+    // Fire once immediately
+    void poll();
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(t);
+    };
+  }, [awaitingPayment, order?.order_id, order?.status]);
 
   useEffect(() => {
     if (!order) return;
@@ -581,6 +710,26 @@ export default function PaymentPage({ planId }: Props) {
                   <p className="mt-2 text-sm text-blue-600 font-medium flex items-center justify-center gap-1">
                     <ShieldCheck size={14} /> Quét mã để thanh toán
                   </p>
+
+                  {paymentBanner ? (
+                    <div className={`mt-3 border rounded-lg px-3 py-2 text-sm font-semibold ${paymentBanner.className}`}>
+                      <div className="flex items-center justify-center gap-2">
+                        {paymentBanner.showSpinner ? (
+                          <span
+                            className="inline-block w-4 h-4 rounded-full border-2 border-amber-300 border-t-amber-700 animate-spin"
+                            aria-hidden="true"
+                          />
+                        ) : null}
+                        <span>{paymentBanner.text}</span>
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {order?.order_code && expiryLabel ? (
+                    <div className="mt-2 text-xs text-slate-600">
+                      Mã thanh toán <span className="font-mono font-semibold text-slate-800">{order.order_code}</span> còn hiệu lực: {expiryLabel}
+                    </div>
+                  ) : null}
                 </div>
 
                 {/* Phần thông tin chuyển khoản */}
@@ -633,9 +782,15 @@ export default function PaymentPage({ planId }: Props) {
                 </div>
                 <button
                   type="button"
-                  className="w-full sm:w-auto px-8 py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg shadow-lg shadow-blue-200 transition transform active:scale-95"
+                  onClick={() => setAwaitingPayment(true)}
+                  disabled={awaitingPayment || order?.status === "paid"}
+                  className={`w-full sm:w-auto px-8 py-3 text-white font-bold rounded-lg shadow-lg transition transform active:scale-95 disabled:opacity-60 disabled:cursor-not-allowed ${
+                    order?.status === "paid"
+                      ? "bg-emerald-600 shadow-emerald-200"
+                      : "bg-blue-600 hover:bg-blue-700 shadow-blue-200"
+                  }`}
                 >
-                  Xác nhận đã thanh toán
+                  {order?.status === "paid" ? "Đã thanh toán" : awaitingPayment ? "Đang đợi thanh toán…" : "Xác nhận đã thanh toán"}
                 </button>
               </div>
             </div>
