@@ -101,6 +101,37 @@ def _pdf_text_len(pdf_path: Path, max_pages: int) -> int:
         return 0
 
 
+def _pdf_text_looks_mojibake(pdf_path: Path, max_pages: int = 2) -> bool:
+    try:
+        import fitz  # PyMuPDF
+
+        doc = fitz.open(str(pdf_path))
+        try:
+            pages_to_check = min(doc.page_count, max_pages)
+            text = []
+            for i in range(pages_to_check):
+                text.append(doc.load_page(i).get_text("text") or "")
+            joined = "\n".join(text)
+            # Replacement character is a definite sign of decoding issues.
+            if "\ufffd" in joined:
+                return True
+            # Detect common UTF-8 -> Windows-1252 mojibake patterns like 'Ã' or 'Â' followed by continuation-byte range
+            for i, ch in enumerate(joined[:-1]):
+                o = ord(ch)
+                if o in (0x00C2, 0x00C3):
+                    next_o = ord(joined[i+1])
+                    if 128 <= next_o <= 191:
+                        return True
+            # Check for suspicious '<' sequences e.g., 'D<' often indicates garbled spacing
+            if "<" in joined and any(c.isalpha() for c in joined.split("<")[0][-2:]):
+                return True
+            return False
+        finally:
+            doc.close()
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def convert_pdf_to_docx_pipeline(*, pdf_path: Path, work_dir: Path, prefer_tier_a: bool = False, force_ocr: bool = False) -> PdfToDocxResult:
     """Professional PDF→DOCX pipeline.
 
@@ -152,9 +183,16 @@ def convert_pdf_to_docx_pipeline(*, pdf_path: Path, work_dir: Path, prefer_tier_
                 timeout_sec=settings.ocr_timeout_sec,
                 extra_path=settings.tesseract_path,
             )
+            # Quick check: ensure OCR result doesn't look like Mojibake (wrong encoding)
+            if _pdf_text_looks_mojibake(ocr_out, max_pages=2):
+                raise EditableConversionUnavailable(
+                    "OCR cục bộ tạo lớp text nhưng phát hiện Mojibake (lỗi font). Hãy đảm bảo Tesseract đã có traineddata 'vie' và TESSDATA_PREFIX/TESSERACT_PATH được cấu hình đúng."
+                )
             # Use OCRed PDF for subsequent Tier A conversions
             pdf_path = ocr_out
             has_text = True
+        except EditableConversionUnavailable:
+            raise
         except Exception as e:
             # Surface OCR failure explicitly
             raise OcrUnavailableError(f"OCR failed: {e}") from e
@@ -176,17 +214,24 @@ def convert_pdf_to_docx_pipeline(*, pdf_path: Path, work_dir: Path, prefer_tier_
                 )
                 return r.docx_path, mode_local
 
+            # Decide whether to request Adobe OCR. If we ran local OCR (force_ocr), we DO NOT request Adobe OCR
+            # so Adobe will use our searchable PDF layer. If user explicitly asked Tier A, we still may request Adobe OCR
+            # if configured (prefer_tier_a semantics). For scanned PDFs where we did local OCR, set ocr_lang=None.
             ocr_lang: str | None = None
-            if (not has_text) and settings.ocr_enabled:
+            if prefer_tier_a:
+                ocr_lang = settings.adobe_ocr_lang
+            elif (not has_text) and settings.ocr_enabled:
                 ocr_lang = settings.adobe_ocr_lang
 
             docx_path, mode = _run_adobe(ocr_lang=ocr_lang)
+
             # If we explicitly ran OCR locally (force_ocr), prefer to mark the mode as "tier-a-ocr"
             if force_ocr:
                 mode = "tier-a-ocr"
+
             # If we did NOT OCR (because PDF appeared to have text), but the resulting
             # DOCX still looks like it has no spaces, retry once with Adobe OCR.
-            if has_text and settings.ocr_enabled:
+            if not prefer_tier_a and has_text and settings.ocr_enabled:
                 space_ratio = _docx_space_ratio(docx_path)
                 if space_ratio > 0 and space_ratio < 0.01:
                     docx_path, mode = _run_adobe(ocr_lang=settings.adobe_ocr_lang)
@@ -199,12 +244,36 @@ def convert_pdf_to_docx_pipeline(*, pdf_path: Path, work_dir: Path, prefer_tier_
             except DocxPostprocessError as e:
                 postprocess_error = str(e)
 
-            # If we forced local OCR before sending to Adobe, detect any mojibake patterns
-            # that indicate encoding/ocr problems and fail rather than returning a broken DOCX.
+            # If we forced local OCR before sending to Adobe, detect any mojibake patterns.
+            # Try Aspose fallback if Adobe produced mojibake after our OCR, otherwise fail with helpful guidance.
             if force_ocr and _docx_looks_mojibake(adobe_result_docx):
-                raise EditableConversionUnavailable(
-                    "Sau khi OCR cục bộ (local) -> Adobe, kết quả chứa dấu hiệu Mojibake (lỗi font). Hãy kiểm tra rằng Tesseract đã sử dụng ngôn ngữ Tiếng Việt và thử lại."
-                )
+                # Attempt Aspose fallback using the searchable PDF (pdf_path should point to OCRed PDF)
+                try:
+                    aspose_fallback_dir = out_dir / "aspose-after-ocr"
+                    aspose_fallback = convert_pdf_to_docx_aspose_words(pdf_path=pdf_path, out_dir=aspose_fallback_dir)
+                    try:
+                        normalize_docx_page_breaks(docx_path=aspose_fallback.docx_path, aggressive=False)
+                    except DocxPostprocessError as e:
+                        postprocess_error = str(e)
+
+                    # If Aspose also looks mojibake, fail explicitly
+                    if _docx_looks_mojibake(aspose_fallback.docx_path):
+                        raise EditableConversionUnavailable(
+                            "Cả Adobe và Aspose trên kết quả OCR cục bộ đều chứa dấu hiệu Mojibake. Vui lòng kiểm tra rằng Tesseract đã dùng traineddata 'vie' và TESSDATA_PREFIX/TESSERACT_PATH đúng."
+                        )
+
+                    # Otherwise, return Aspose result as a fallback (less ideal layout but preserves text)
+                    return PdfToDocxResult(
+                        docx_path=aspose_fallback.docx_path,
+                        mode="aspose-after-ocr",
+                        has_text_layer=True,
+                    )
+                except Exception as e_fallback:
+                    # Surface a combined error explaining both failures
+                    raise EditableConversionUnavailable(
+                        "Sau khi OCR cục bộ (local) -> Adobe, kết quả chứa dấu hiệu Mojibake; thử fallback bằng Aspose cũng thất bại: "
+                        + str(e_fallback)
+                    ) from e_fallback
 
             # Missing-content guard for text-layer PDFs
             if has_text:

@@ -20,12 +20,21 @@ RUN apt-get update && apt-get install -y \
     libgl1 \
     libglib2.0-0 \
     libgdiplus \
+    libicu-dev \
+    locales \
     poppler-utils \
     curl \
+    && sed -i 's/# en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen \
+    && sed -i 's/# vi_VN.UTF-8 UTF-8/vi_VN.UTF-8 UTF-8/' /etc/locale.gen || true \
+    && locale-gen en_US.UTF-8 vi_VN.UTF-8 \
+    && update-locale LANG=en_US.UTF-8 \
     && rm -rf /var/lib/apt/lists/*
 
 # 4. Thiết lập thư mục
 WORKDIR /app
+
+# Ensure container default locale is UTF-8 so native globalization libraries can find data
+ENV LANG en_US.UTF-8
 
 # 5. Cài thư viện Python
 COPY requirements.txt .

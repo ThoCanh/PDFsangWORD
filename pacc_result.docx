@@ -1,0 +1,1 @@
+{"detail":"OCR cục bộ tạo lớp text nhưng phát hiện Mojibake (lỗi font). Hãy đảm bảo Tesseract đã có traineddata 'vie' và TESSDATA_PREFIX/TESSERACT_PATH được cấu hình đúng."}
