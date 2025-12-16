@@ -90,6 +90,11 @@ class PaymentOrder(Base):
     user_id: Mapped[int] = mapped_column(Integer, index=True, nullable=False)
     plan_id: Mapped[int] = mapped_column(Integer, index=True, nullable=False)
 
+    # Snapshots for reporting/history (do not depend on mutable user/plan records)
+    user_account_name: Mapped[str] = mapped_column(String(320), nullable=False, default="")
+    plan_name: Mapped[str] = mapped_column(String(128), nullable=False, default="")
+    unit_price_vnd: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
     quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     subtotal_vnd: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     discount_vnd: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

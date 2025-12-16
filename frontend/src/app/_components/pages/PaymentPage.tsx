@@ -5,6 +5,7 @@ import { Check, Copy, ShieldCheck, CreditCard, Download, Info } from "lucide-rea
 import { useParams, useRouter } from "next/navigation";
 
 import { BACKEND_URL } from "../../_config/app";
+import { useAuth } from "../auth/AuthContext";
 import { getAccessToken } from "../auth/token";
 
 type SelectedPlan = {
@@ -47,6 +48,8 @@ type Props = {
 
 export default function PaymentPage({ planId }: Props) {
   const router = useRouter();
+  const auth = useAuth();
+  const refreshedAfterPaidRef = React.useRef(false);
   const params = useParams();
   const paramPlanId = (() => {
     const v = (params as any)?.planId;
@@ -242,6 +245,21 @@ export default function PaymentPage({ planId }: Props) {
 
     return null;
   }, [awaitingPayment, order]);
+
+  useEffect(() => {
+    if (!order) return;
+    if (order.status !== "paid") {
+      refreshedAfterPaidRef.current = false;
+      return;
+    }
+
+    if (refreshedAfterPaidRef.current) return;
+    refreshedAfterPaidRef.current = true;
+
+    // Once the payment is confirmed paid (via webhook + polling), refresh user profile
+    // so planKey updates immediately across the app.
+    auth.refresh();
+  }, [auth, order?.order_id, order?.status]);
 
   const expiryLabel = useMemo(() => {
     if (!order || remainingSec == null) return null;

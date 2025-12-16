@@ -178,6 +178,9 @@ def create_order(
         status="pending",
         user_id=current_user.id,
         plan_id=plan.id,
+        user_account_name=current_user.email,
+        plan_name=plan.name,
+        unit_price_vnd=plan.price_vnd,
         quantity=payload.quantity,
         subtotal_vnd=subtotal,
         discount_vnd=discount,
@@ -374,17 +377,26 @@ def _process_sepay_webhook(*, request: Request, payload: SePayWebhookPayload, db
     db.add(tx)
 
     # Update order/user if match found
-    if order and order.status == "pending":
-        # Mark paid if amount covers expected total
-        if amount >= int(order.total_vnd):
-            order.status = "paid"
-            order.paid_at = datetime.now(timezone.utc)
+    if order:
+        expected_total = int(order.total_vnd)
 
+        # Mark paid if amount covers expected total
+        if amount >= expected_total:
+            if order.status != "paid":
+                order.status = "paid"
+            if not order.paid_at:
+                order.paid_at = datetime.now(timezone.utc)
+
+            # Idempotent: always ensure user's plan is upgraded to match the paid order.
             user = db.get(User, order.user_id)
             if user:
-                user.plan_key = f"plan:{order.plan_id}"
-                db.add(user)
-        else:
+                desired_key = f"plan:{order.plan_id}"
+                if getattr(user, "plan_key", "") != desired_key:
+                    user.plan_key = desired_key
+                    db.add(user)
+
+        # Only mark mismatch while still pending; don't downgrade a paid order.
+        elif order.status == "pending":
             order.status = "amount_mismatch"
 
         db.add(order)

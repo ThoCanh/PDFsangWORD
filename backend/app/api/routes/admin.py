@@ -1,19 +1,17 @@
+
+
 from __future__ import annotations
-
-from datetime import datetime, timezone
-from datetime import timedelta
-
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, EmailStr
 from sqlalchemy import text
 from sqlalchemy.orm import Session
-
+from datetime import datetime, timezone, timedelta
 from ..deps import get_db, require_admin
 from ...core.config import settings
 from ...core.log_buffer import get_log_items
-from ...db.models import ConversionJob, Plan, User
+from ...db.models import ConversionJob, Plan, User, PaymentOrder
+from ._payment_utils import compute_subscription_expiry
 from ...utils.files import which
-
 
 # Protect the entire admin router by default.
 router = APIRouter(
@@ -21,6 +19,37 @@ router = APIRouter(
     tags=["admin"],
     dependencies=[Depends(require_admin)],
 )
+
+# --- Assign Plan API ---
+class AssignPlanRequest(BaseModel):
+    email: str
+    plan_id: int
+
+class AssignPlanResponse(BaseModel):
+    ok: bool
+    user_id: int | None = None
+    email: str | None = None
+    plan_key: str | None = None
+    error: str | None = None
+
+@router.post("/assign-plan", response_model=AssignPlanResponse)
+def assign_plan_to_user(payload: AssignPlanRequest, db: Session = Depends(get_db)):
+    email = (payload.email or "").strip().lower()
+    plan_id = payload.plan_id
+    if not email or not plan_id:
+        return AssignPlanResponse(ok=False, error="Thiếu email hoặc plan_id")
+    user = db.query(User).filter(User.email == email).first()
+    if not user:
+        return AssignPlanResponse(ok=False, error="Không tìm thấy user với email này")
+    plan = db.query(Plan).filter(Plan.id == plan_id).first()
+    if not plan:
+        return AssignPlanResponse(ok=False, error="Không tìm thấy gói với id này")
+    user.plan_key = f"plan:{plan_id}"
+    db.add(user)
+    db.commit()
+    return AssignPlanResponse(ok=True, user_id=user.id, email=user.email, plan_key=user.plan_key)
+
+
 
 
 class PlanCreateRequest(BaseModel):
@@ -242,6 +271,60 @@ def list_users(db: Session = Depends(get_db)):
         )
         for u in users
     ]
+
+
+class AdminPurchaseResponse(BaseModel):
+    id: int
+    name: str
+    plan: str
+    quantity: int
+    price_vnd: int
+    purchased_at: datetime
+    expires_at: datetime
+    active: bool
+
+
+@router.get("/purchases", response_model=list[AdminPurchaseResponse])
+def list_purchases(db: Session = Depends(get_db)):
+    """List paid purchases for admin reporting."""
+
+    now = datetime.now(timezone.utc)
+
+    orders = (
+        db.query(PaymentOrder)
+        .filter(PaymentOrder.status == "paid")
+        .filter(PaymentOrder.paid_at.isnot(None))
+        .order_by(PaymentOrder.paid_at.desc(), PaymentOrder.id.desc())
+        .all()
+    )
+
+    out: list[AdminPurchaseResponse] = []
+    for o in orders:
+        paid_at = o.paid_at
+        if paid_at is None:
+            continue
+        if paid_at.tzinfo is None:
+            paid_at = paid_at.replace(tzinfo=timezone.utc)
+
+        # billing_cycle is snapshot-less today; default month
+        # Quantity represents months in current UI.
+        expires_at = compute_subscription_expiry(paid_at, quantity=o.quantity, billing_cycle="month")
+        active = expires_at > now
+
+        out.append(
+            AdminPurchaseResponse(
+                id=o.id,
+                name=(getattr(o, "user_account_name", "") or "").strip() or str(o.user_id),
+                plan=(getattr(o, "plan_name", "") or "").strip() or f"plan:{o.plan_id}",
+                quantity=int(o.quantity or 1),
+                price_vnd=int(o.total_vnd or 0),
+                purchased_at=paid_at,
+                expires_at=expires_at,
+                active=active,
+            )
+        )
+
+    return out
 
 
 class SystemStatusResponse(BaseModel):
