@@ -139,3 +139,31 @@ class PaymentTransaction(Base):
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="received")
 
     raw_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+
+
+class PlanAssignment(Base):
+    __tablename__ = "plan_assignments"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    # The user who was assigned a plan
+    user_id: Mapped[int] = mapped_column(Integer, index=True, nullable=False)
+    # Snapshot name/email for convenience in reports
+    user_name: Mapped[str] = mapped_column(String(320), nullable=False, default="")
+
+    # plan details snapshot
+    plan_id: Mapped[int] = mapped_column(Integer, index=True, nullable=False)
+    plan_key: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+
+    # When assignment started and optional duration in months
+    start_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    duration_months: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    # Admin who assigned (nullable for system/webhook assignments)
+    assigned_by: Mapped[int | None] = mapped_column(Integer, index=True, nullable=True)
+    assigned_by_name: Mapped[str | None] = mapped_column(String(320), nullable=True)
+
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)

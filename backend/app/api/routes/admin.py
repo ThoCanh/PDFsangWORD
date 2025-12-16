@@ -7,9 +7,10 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 from datetime import datetime, timezone, timedelta
 from ..deps import get_db, require_admin
+from ..deps import get_current_user
 from ...core.config import settings
 from ...core.log_buffer import get_log_items
-from ...db.models import ConversionJob, Plan, User, PaymentOrder
+from ...db.models import ConversionJob, Plan, User, PaymentOrder, PlanAssignment
 from ._payment_utils import compute_subscription_expiry
 from ...utils.files import which
 
@@ -35,7 +36,7 @@ class AssignPlanResponse(BaseModel):
     error: str | None = None
 
 @router.post("/assign-plan", response_model=AssignPlanResponse)
-def assign_plan_to_user(payload: AssignPlanRequest, db: Session = Depends(get_db)):
+def assign_plan_to_user(payload: AssignPlanRequest, db: Session = Depends(get_db), current_admin: User = Depends(get_current_user)):
     email = (payload.email or "").strip().lower()
     plan_id = payload.plan_id
     if not email or not plan_id:
@@ -46,10 +47,27 @@ def assign_plan_to_user(payload: AssignPlanRequest, db: Session = Depends(get_db
     plan = db.query(Plan).filter(Plan.id == plan_id).first()
     if not plan:
         return AssignPlanResponse(ok=False, error="Không tìm thấy gói với id này")
+
+    # Update user record
     user.plan_key = f"plan:{plan_id}"
     user.plan_assigned_at = datetime.now(timezone.utc)
     user.plan_duration_months = int(payload.duration_months) if payload.duration_months is not None else None
     db.add(user)
+
+    # Create a PlanAssignment record for history and reporting
+    pa = PlanAssignment(
+        user_id=user.id,
+        user_name=(user.email or "").strip(),
+        plan_id=plan_id,
+        plan_key=user.plan_key,
+        start_at=user.plan_assigned_at,
+        duration_months=user.plan_duration_months,
+        assigned_by=current_admin.id if current_admin is not None else None,
+        assigned_by_name=(current_admin.email if current_admin is not None else None),
+        notes="assigned via admin API",
+    )
+    db.add(pa)
+
     db.commit()
     return AssignPlanResponse(ok=True, user_id=user.id, email=user.email, plan_key=user.plan_key)
 
@@ -331,6 +349,127 @@ def list_purchases(db: Session = Depends(get_db)):
     return out
 
 
+class PurchaseUpdateRequest(BaseModel):
+    quantity: int | None = None
+
+
+@router.delete("/purchases/{purchase_id}")
+def delete_purchase(purchase_id: int, db: Session = Depends(get_db)):
+    po = db.get(PaymentOrder, purchase_id)
+    if not po:
+        raise HTTPException(status_code=404, detail="Purchase not found")
+    db.delete(po)
+    db.commit()
+    return {"ok": True, "id": purchase_id}
+
+
+@router.put("/purchases/{purchase_id}")
+def update_purchase(purchase_id: int, body: PurchaseUpdateRequest, db: Session = Depends(get_db)):
+    po = db.get(PaymentOrder, purchase_id)
+    if not po:
+        raise HTTPException(status_code=404, detail="Purchase not found")
+    if body.quantity is not None:
+        po.quantity = int(body.quantity)
+    db.add(po)
+    db.commit()
+    db.refresh(po)
+    return {"ok": True, "id": po.id, "quantity": po.quantity}
+
+
+class PlanAssignmentAdminResponse(BaseModel):
+    id: int
+    user_id: int
+    name: str
+    plan: str
+    start_at: datetime | None
+    end_at: datetime | None
+    duration_months: int | None
+    admin_name: str | None
+
+
+@router.get("/plan-assignments", response_model=list[PlanAssignmentAdminResponse])
+def list_plan_assignments(db: Session = Depends(get_db)):
+    """List plan assignments (admin audit)."""
+    now = datetime.now(timezone.utc)
+    rows = db.query(PlanAssignment).order_by(PlanAssignment.created_at.desc(), PlanAssignment.id.desc()).all()
+    out: list[PlanAssignmentAdminResponse] = []
+    for r in rows:
+        start_at = r.start_at
+        end_at = None
+        try:
+            if start_at is not None and r.duration_months is not None:
+                end_at = compute_subscription_expiry(start_at, quantity=int(r.duration_months or 0), billing_cycle="month")
+        except Exception:
+            end_at = None
+
+        out.append(
+            PlanAssignmentAdminResponse(
+                id=r.id,
+                user_id=int(r.user_id),
+                name=(r.user_name or "") or "",
+                plan=(r.plan_key or f"plan:{r.plan_id}"),
+                start_at=start_at,
+                end_at=end_at,
+                duration_months=r.duration_months,
+                admin_name=r.assigned_by_name,
+            )
+        )
+    return out
+
+
+class PlanAssignmentUpdateRequest(BaseModel):
+    duration_months: int | None = None
+    # ISO datetime string or null
+    start_at: datetime | None = None
+
+
+@router.delete("/plan-assignments/{pa_id}")
+def delete_plan_assignment(pa_id: int, db: Session = Depends(get_db)):
+    pa = db.get(PlanAssignment, pa_id)
+    if not pa:
+        raise HTTPException(status_code=404, detail="Plan assignment not found")
+    db.delete(pa)
+    db.commit()
+    return {"ok": True, "id": pa_id}
+
+
+@router.put("/plan-assignments/{pa_id}")
+def update_plan_assignment(pa_id: int, body: PlanAssignmentUpdateRequest, db: Session = Depends(get_db)):
+    pa = db.get(PlanAssignment, pa_id)
+    if not pa:
+        raise HTTPException(status_code=404, detail="Plan assignment not found")
+    if body.duration_months is not None:
+        pa.duration_months = int(body.duration_months)
+    if body.start_at is not None:
+        pa.start_at = body.start_at
+    db.add(pa)
+    db.commit()
+    db.refresh(pa)
+    return {"ok": True, "id": pa.id}
+
+
+@router.delete("/users/{user_id}")
+def delete_user(user_id: int, db: Session = Depends(get_db), current_admin: User = Depends(get_current_user)):
+    """Delete a user (admin only). Prevent deleting self or removing last admin."""
+    user = db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # Prevent admin from deleting themselves
+    if user.id == current_admin.id:
+        raise HTTPException(status_code=400, detail="Cannot delete yourself")
+
+    # If deleting an admin, ensure at least one admin remains
+    if user.role == "admin":
+        admins_count = db.query(User).filter(User.role == "admin").count()
+        if admins_count <= 1:
+            raise HTTPException(status_code=400, detail="Cannot delete the last admin")
+
+    db.delete(user)
+    db.commit()
+    return {"ok": True, "user_id": user_id}
+
+
 class SystemStatusResponse(BaseModel):
     app_name: str
     server_time: datetime
@@ -345,17 +484,22 @@ class SystemMetricsResponse(BaseModel):
     ram_used_bytes: int
     ram_total_bytes: int
     ram_percent: float
+    note: str | None = None
 
 
 @router.get("/system/metrics", response_model=SystemMetricsResponse)
 def system_metrics():
     try:
         import psutil  # type: ignore
-    except Exception as e:  # noqa: BLE001
-        raise HTTPException(
-            status_code=500,
-            detail="psutil is not installed on the server",
-        ) from e
+    except Exception:
+        # psutil not available: return zeroed metrics with a helpful note instead of 500
+        return SystemMetricsResponse(
+            cpu_percent=0.0,
+            ram_used_bytes=0,
+            ram_total_bytes=0,
+            ram_percent=0.0,
+            note="Phần mềm psutil chưa được cài đặt trên máy chủ. Cài trong môi trường backend bằng: pip install psutil và khởi động lại backend.",
+        )
 
     # interval>0 gives a real sampled reading.
     cpu_percent = float(psutil.cpu_percent(interval=0.2))

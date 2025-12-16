@@ -235,7 +235,8 @@ export default function AdminDashboard() {
         isOpen={isAssignPackageOpen}
         onClose={() => setIsAssignPackageOpen(false)}
         onSave={() => {
-          // demo UI only
+          // Refresh plans and assignments lists
+          setPlansReloadToken((v) => v + 1);
         }}
       />
     </div>

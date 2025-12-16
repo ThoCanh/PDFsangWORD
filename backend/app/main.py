@@ -88,6 +88,33 @@ def _init_db() -> None:
         except Exception:
             # Table may not exist yet on first run, or DB may not support ALTER in the same way.
             pass
+        # Ensure plan_assignments table exists (history of admin/system plan assignments)
+        try:
+            tables = {t for t in inspector.get_table_names()}
+            if "plan_assignments" not in tables:
+                with engine.begin() as conn:
+                    # Create a minimal table compatible with SQLite/Postgres
+                    conn.execute(
+                        text(
+                            """
+                        CREATE TABLE plan_assignments (
+                            id INTEGER PRIMARY KEY,
+                            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                            user_id INTEGER NOT NULL,
+                            user_name VARCHAR(320) NOT NULL DEFAULT '',
+                            plan_id INTEGER NOT NULL,
+                            plan_key VARCHAR(64) NOT NULL DEFAULT '',
+                            start_at TIMESTAMP WITH TIME ZONE NULL,
+                            duration_months INTEGER NULL,
+                            assigned_by INTEGER NULL,
+                            assigned_by_name VARCHAR(320) NULL,
+                            notes TEXT NULL
+                        )
+                    """
+                        )
+                    )
+        except Exception:
+            pass
     except Exception:
         # If migration fails, do not block server startup.
         # (Admin/user flows will surface issues in logs.)

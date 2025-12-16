@@ -37,6 +37,17 @@ type PurchaseRow = {
   active: boolean;
 };
 
+type AssignmentRow = {
+  id: number;
+  user_id: number;
+  name: string;
+  plan: string;
+  start_at: string | null;
+  end_at: string | null;
+  duration_months: number | null;
+  admin_name: string | null;
+};
+
 function formatPriceVnd(value: number) {
   try {
     return new Intl.NumberFormat("vi-VN").format(value) + "đ";
@@ -65,6 +76,10 @@ export default function ProPlanView({ onAddPlan, onAssignPackage, reloadToken }:
   const [purchasesLoading, setPurchasesLoading] = React.useState(true);
   const [purchasesError, setPurchasesError] = React.useState<string | null>(null);
   const [purchases, setPurchases] = React.useState<PurchaseRow[]>([]);
+
+  const [assignmentsLoading, setAssignmentsLoading] = React.useState(true);
+  const [assignmentsError, setAssignmentsError] = React.useState<string | null>(null);
+  const [assignments, setAssignments] = React.useState<AssignmentRow[]>([]);
 
   const deletePlan = React.useCallback(async (plan: Plan) => {
     const ok =
@@ -166,6 +181,42 @@ export default function ProPlanView({ onAddPlan, onAssignPackage, reloadToken }:
     }
 
     void loadPurchases();
+    return () => {
+      cancelled = true;
+    };
+  }, [reloadToken, refreshKey]);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    async function loadAssignments() {
+      setAssignmentsLoading(true);
+      setAssignmentsError(null);
+      try {
+        const token = getAccessToken();
+        const res = await fetch(`${BACKEND_URL}/admin/plan-assignments`, {
+          headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+        });
+
+        if (res.status === 401) {
+          throw new Error("Chưa đăng nhập (401). Hãy login để lấy access_token.");
+        }
+        if (res.status === 403) {
+          throw new Error("Không đủ quyền (403). Tài khoản phải có role=admin.");
+        }
+        if (!res.ok) {
+          throw new Error(`Lỗi tải danh sách gán gói (${res.status}).`);
+        }
+
+        const data = (await res.json()) as AssignmentRow[];
+        if (!cancelled) setAssignments(Array.isArray(data) ? data : []);
+      } catch (e: unknown) {
+        if (!cancelled) setAssignmentsError(e instanceof Error ? e.message : "Không thể tải dữ liệu");
+      } finally {
+        if (!cancelled) setAssignmentsLoading(false);
+      }
+    }
+
+    void loadAssignments();
     return () => {
       cancelled = true;
     };
@@ -346,7 +397,7 @@ export default function ProPlanView({ onAddPlan, onAssignPackage, reloadToken }:
         <div className="px-6 py-4 border-b border-slate-100 bg-slate-50">
           <div className="text-sm font-bold text-slate-800">Danh sách user đã mua gói</div>
           <div className="text-xs text-slate-500 mt-1">
-            Hiển thị lịch sử mua gói: ID, Tên, Gói, Số lượng, Ngày mua, Ngày hết hạn, Giá tiền, Hoạt động.
+            Hiển thị lịch sử mua gói: ID, Tên, Gói, Số lượng, Ngày mua, Ngày hết hạn, Giá tiền, Trạng thái và Hành động (Sửa/Xóa).
           </div>
         </div>
 
@@ -361,6 +412,7 @@ export default function ProPlanView({ onAddPlan, onAssignPackage, reloadToken }:
                 <th className="p-4 text-xs font-semibold text-slate-500 uppercase">Ngày mua</th>
                 <th className="p-4 text-xs font-semibold text-slate-500 uppercase">Ngày hết hạn</th>
                 <th className="p-4 text-xs font-semibold text-slate-500 uppercase">Giá tiền</th>
+                <th className="p-4 text-xs font-semibold text-slate-500 uppercase">Trạng Thái</th>
                 <th className="p-4 text-xs font-semibold text-slate-500 uppercase">Hoạt động</th>
               </tr>
             </thead>
@@ -401,8 +453,217 @@ export default function ProPlanView({ onAddPlan, onAssignPackage, reloadToken }:
                       <td className="p-4 text-sm text-slate-600">{formatDate(r.purchased_at)}</td>
                       <td className="p-4 text-sm text-slate-600">{formatDate(r.expires_at)}</td>
                       <td className="p-4 text-sm text-slate-700 font-medium">{formatPriceVnd(r.price_vnd)}</td>
-                      <td className="p-4">
+                      <td className="p-4 text-sm text-slate-700">
                         <StatusBadge status={r.active ? "active" : "expired"} />
+                      </td>
+                      <td className="p-4">
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={async () => {
+                              const ok = typeof window !== 'undefined' ? window.confirm(`Xóa bản ghi mua gói ID ${r.id}?`) : false;
+                              if (!ok) return;
+                              try {
+                                const token = getAccessToken();
+                                const res = await fetch(`${BACKEND_URL}/admin/purchases/${r.id}`, {
+                                  method: 'DELETE',
+                                  headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+                                });
+                                if (!res.ok) {
+                                  const txt = await res.text().catch(() => 'Lỗi');
+                                  alert(`Xóa thất bại: ${txt}`);
+                                  return;
+                                }
+                                setRefreshKey(v => v + 1);
+                              } catch (e) {
+                                alert(e instanceof Error ? e.message : String(e));
+                              }
+                            }}
+                            className="p-2 rounded-lg hover:bg-rose-50 text-rose-600"
+                            title="Xóa mua gói"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+
+                          <button
+                            onClick={async () => {
+                              const input = prompt('Sửa số lượng (tháng):', String(r.quantity));
+                              if (input === null) return;
+                              const n = Number(input);
+                              if (Number.isNaN(n) || n <= 0) {
+                                alert('Số lượng không hợp lệ');
+                                return;
+                              }
+
+                              try {
+                                const token = getAccessToken();
+                                const res = await fetch(`${BACKEND_URL}/admin/purchases/${r.id}`, {
+                                  method: 'PUT',
+                                  headers: {
+                                    'Content-Type': 'application/json',
+                                    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+                                  },
+                                  body: JSON.stringify({ quantity: n }),
+                                });
+                                if (!res.ok) {
+                                  const txt = await res.text().catch(() => 'Lỗi');
+                                  alert(`Cập nhật thất bại: ${txt}`);
+                                  return;
+                                }
+                                setRefreshKey(v => v + 1);
+                              } catch (e) {
+                                alert(e instanceof Error ? e.message : String(e));
+                              }
+                            }}
+                            className="p-2 rounded-lg hover:bg-slate-100 text-slate-600"
+                            title="Sửa mua gói"
+                          >
+                            <Edit2 size={16} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))
+                : null}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
+        <div className="px-6 py-4 border-b border-slate-100 bg-slate-50">
+          <div className="text-sm font-bold text-slate-800">Danh sách Gán gói</div>
+          <div className="text-xs text-slate-500 mt-1">
+            Lịch sử các lần gán gói (ID, Tên, Gói, Ngày bắt đầu, Ngày kết thúc, Số tháng, ADMIN).
+          </div>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse">
+            <thead className="bg-slate-50">
+              <tr>
+                <th className="p-4 text-xs font-semibold text-slate-500 uppercase">ID</th>
+                <th className="p-4 text-xs font-semibold text-slate-500 uppercase">Tên</th>
+                <th className="p-4 text-xs font-semibold text-slate-500 uppercase">Gói</th>
+                <th className="p-4 text-xs font-semibold text-slate-500 uppercase">Ngày bắt đầu</th>
+                <th className="p-4 text-xs font-semibold text-slate-500 uppercase">Ngày hết hạn</th>
+                <th className="p-4 text-xs font-semibold text-slate-500 uppercase">Số tháng</th>
+                <th className="p-4 text-xs font-semibold text-slate-500 uppercase">ADMIN</th>
+                <th className="p-4 text-xs font-semibold text-slate-500 uppercase">Trạng Thái</th>
+                <th className="p-4 text-xs font-semibold text-slate-500 uppercase">Hoạt Động</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {assignmentsLoading && (
+                <tr>
+                  <td colSpan={7} className="p-10 text-center text-sm text-slate-500">
+                    Đang tải danh sách gán gói…
+                  </td>
+                </tr>
+              )}
+
+              {!assignmentsLoading && assignmentsError && (
+                <tr>
+                  <td colSpan={7} className="p-10 text-center text-sm text-rose-600">
+                    {assignmentsError}
+                  </td>
+                </tr>
+              )}
+
+              {!assignmentsLoading && !assignmentsError && assignments.length === 0 && (
+                <tr>
+                  <td colSpan={7} className="p-10 text-center text-sm text-slate-500">
+                    Chưa có bản ghi gán gói.
+                  </td>
+                </tr>
+              )}
+
+              {!assignmentsLoading && !assignmentsError
+                ? assignments.map((r) => (
+                    <tr key={r.id} className="hover:bg-slate-50 transition-colors">
+                      <td className="p-4 text-sm text-slate-700 font-medium">{r.id}</td>
+                      <td className="p-4">
+                        <div className="text-sm font-semibold text-slate-800">{r.name}</div>
+                      </td>
+                      <td className="p-4 text-sm text-slate-700">{r.plan}</td>
+                      <td className="p-4 text-sm text-slate-600">{formatDate(r.start_at || '')}</td>
+                      <td className="p-4 text-sm text-slate-600">{formatDate(r.end_at || '')}</td>
+                      <td className="p-4 text-sm text-slate-700">{r.duration_months ?? '—'}</td>
+                      <td className="p-4 text-sm text-slate-700">{r.admin_name ?? '—'}</td>
+                      <td className="p-4 text-sm text-slate-700">
+                        {(() => {
+                          try {
+                            if (!r.end_at) return <StatusBadge status={"active"} />;
+                            const d = new Date(r.end_at);
+                            return d.getTime() > Date.now() ? <StatusBadge status={"active"} /> : <StatusBadge status={"expired"} />;
+                          } catch (e) {
+                            return <StatusBadge status={"active"} />;
+                          }
+                        })()}
+                      </td>
+                      <td className="p-4">
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={async () => {
+                              const ok = typeof window !== 'undefined' ? window.confirm(`Xóa bản ghi gán gói ID ${r.id}?`) : false;
+                              if (!ok) return;
+                              try {
+                                const token = getAccessToken();
+                                const res = await fetch(`${BACKEND_URL}/admin/plan-assignments/${r.id}`, {
+                                  method: 'DELETE',
+                                  headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+                                });
+                                if (!res.ok) {
+                                  const txt = await res.text().catch(() => 'Lỗi');
+                                  alert(`Xóa thất bại: ${txt}`);
+                                  return;
+                                }
+                                setRefreshKey(v => v + 1);
+                              } catch (e) {
+                                alert(e instanceof Error ? e.message : String(e));
+                              }
+                            }}
+                            className="p-2 rounded-lg hover:bg-rose-50 text-rose-600"
+                            title="Xóa gán gói"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+
+                          <button
+                            onClick={async () => {
+                              const input = prompt('Số tháng (để trống = vô hạn):', r.duration_months ? String(r.duration_months) : '');
+                              if (input === null) return;
+                              const n = input.trim() === '' ? null : Number(input);
+                              if (n !== null && (Number.isNaN(n) || n < 0)) {
+                                alert('Số tháng không hợp lệ');
+                                return;
+                              }
+
+                              try {
+                                const token = getAccessToken();
+                                const res = await fetch(`${BACKEND_URL}/admin/plan-assignments/${r.id}`, {
+                                  method: 'PUT',
+                                  headers: {
+                                    'Content-Type': 'application/json',
+                                    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+                                  },
+                                  body: JSON.stringify({ duration_months: n }),
+                                });
+                                if (!res.ok) {
+                                  const txt = await res.text().catch(() => 'Lỗi');
+                                  alert(`Cập nhật thất bại: ${txt}`);
+                                  return;
+                                }
+                                setRefreshKey(v => v + 1);
+                              } catch (e) {
+                                alert(e instanceof Error ? e.message : String(e));
+                              }
+                            }}
+                            className="p-2 rounded-lg hover:bg-slate-100 text-slate-600"
+                            title="Sửa gán gói"
+                          >
+                            <Edit2 size={16} />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))

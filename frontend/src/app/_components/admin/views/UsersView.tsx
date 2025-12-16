@@ -195,12 +195,52 @@ export default function UsersView({ onAddUser, onEditUser, reloadToken }: Props)
                   </td>
                   <td className="p-4 text-sm text-slate-600">{u.lastLogin}</td>
                   <td className="p-4 text-sm text-slate-600">{u.joinDate}</td>
-                  <td className="p-4 text-right">
+                  <td className="p-4 text-right flex justify-end gap-2">
                     <button
                       onClick={() => onEditUser(u)}
                       className="inline-flex items-center px-3 py-1.5 text-sm font-medium bg-white border border-slate-200 rounded-lg hover:bg-slate-100 text-slate-900"
                     >
                       <Edit2 size={14} className="mr-2 text-slate-500" /> Sửa
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        // Navigate to admin operations page for this user
+                        window.location.href = `/admin?userId=${u.id}`;
+                      }}
+                      className="inline-flex items-center px-3 py-1.5 text-sm font-medium bg-white border border-slate-200 rounded-lg hover:bg-slate-100 text-slate-900"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-2 text-slate-500" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M3 7v4m0 0V7m0 4h4M21 7v4m0 0V7m0 4h-4M3 17v-4m0 4h4m10 0h4m-4 0v-4" />
+                      </svg>
+                      Hệ thống &amp; vận hành
+                    </button>
+
+                    <button
+                      onClick={async () => {
+                        if (!confirm(`Xác nhận xóa người dùng ${u.email}?`)) return;
+                        try {
+                          const token = getAccessToken();
+                          const res = await fetch(`${BACKEND_URL}/admin/users/${u.id}`, {
+                            method: "DELETE",
+                            headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+                          });
+                          if (!res.ok) {
+                            const msg = await res.text().catch(() => "");
+                            throw new Error(msg || `Xoá thất bại (${res.status})`);
+                          }
+                          // Remove from current rows
+                          setRows((prev) => prev.filter((r) => r.id !== u.id));
+                        } catch (e: unknown) {
+                          alert(e instanceof Error ? e.message : "Lỗi khi xóa người dùng");
+                        }
+                      }}
+                      className="inline-flex items-center px-3 py-1.5 text-sm font-medium bg-white border border-rose-200 rounded-lg hover:bg-rose-50 text-rose-600"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-2" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.68.107 1.01.166M21 6l-2.18 12.1A2 2 0 0116.85 20H7.15a2 2 0 01-1.97-1.9L3 6m5 0V4a2 2 0 012-2h4a2 2 0 012 2v2" />
+                      </svg>
+                      Xóa
                     </button>
                   </td>
                 </tr>

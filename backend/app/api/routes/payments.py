@@ -427,6 +427,25 @@ def _process_sepay_webhook(*, request: Request, payload: SePayWebhookPayload, db
                     user.plan_assigned_at = datetime.now(timezone.utc)
                     db.add(user)
 
+                    # Record assignment in history table (system-assigned via payment)
+                    try:
+                        from ...db.models import PlanAssignment
+
+                        pa = PlanAssignment(
+                            user_id=user.id,
+                            user_name=(user.email or "").strip(),
+                            plan_id=order.plan_id,
+                            plan_key=desired_key,
+                            start_at=user.plan_assigned_at,
+                            duration_months=int(order.quantity or 0),
+                            assigned_by=None,
+                            assigned_by_name="system:sepay",
+                            notes=f"assigned via payment order {order.id}",
+                        )
+                        db.add(pa)
+                    except Exception:
+                        pass
+
         # Only mark mismatch while still pending; don't downgrade a paid order.
         elif order.status == "pending":
             order.status = "amount_mismatch"

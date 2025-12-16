@@ -25,6 +25,7 @@ type SystemMetrics = {
   ram_used_bytes: number;
   ram_total_bytes: number;
   ram_percent: number;
+  note?: string | null;
 };
 
 function changeClass(change: string) {
@@ -54,15 +55,39 @@ export default function DashboardView() {
       return;
     }
 
-    fetch(`${BACKEND_URL}/admin/stats`, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-      .then((r) => (r.ok ? r.json() : Promise.reject(r)))
-      .then((data: AdminStatsResponse) => {
-        setStats(data);
-        setStatsError(null);
-      })
-      .catch(() => setStatsError("Không thể tải thống kê"));
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`${BACKEND_URL}/admin/stats`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+
+        if (!res.ok) {
+          // Try to surface server error details
+          const txt = await res.text().catch(() => `HTTP ${res.status}`);
+          let detail = txt;
+          try {
+            const j = JSON.parse(txt);
+            detail = j.detail || j.message || txt;
+          } catch (e) {
+            /* not json */
+          }
+          throw new Error(detail || `HTTP ${res.status}`);
+        }
+
+        const data = (await res.json()) as AdminStatsResponse;
+        if (!cancelled) {
+          setStats(data);
+          setStatsError(null);
+        }
+      } catch (e) {
+        if (!cancelled) setStatsError(e instanceof Error ? e.message : "Không thể tải thống kê");
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   React.useEffect(() => {
@@ -82,14 +107,25 @@ export default function DashboardView() {
           signal: controller.signal,
         });
 
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        if (!res.ok) {
+          // Surface server error body if available
+          const txt = await res.text().catch(() => `HTTP ${res.status}`);
+          let detail = txt;
+          try {
+            const j = JSON.parse(txt);
+            detail = j.detail || j.message || txt;
+          } catch (e) {
+            /* not json */
+          }
+          throw new Error(detail || `HTTP ${res.status}`);
+        }
 
         const data = (await res.json()) as SystemMetrics;
         if (!cancelled) setMetrics(data);
       } catch (e) {
         if (cancelled) return;
         if (e instanceof DOMException && e.name === "AbortError") return;
-        setMetricsError("Không thể tải trạng thái hệ thống.");
+        setMetricsError(e instanceof Error ? e.message : "Không thể tải trạng thái hệ thống.");
       } finally {
         if (!cancelled) setLoadingMetrics(false);
       }
@@ -304,6 +340,13 @@ export default function DashboardView() {
           {metricsError ? (
             <div className="px-6 pb-4 text-xs text-rose-700 font-medium">
               {metricsError}
+            </div>
+          ) : null}
+
+          {(!metricsError && metrics?.note) ? (
+            <div className="px-6 pb-4 text-xs text-amber-700 font-medium space-y-1">
+              <div>{metrics.note}</div>
+              <div className="text-xxs text-slate-600">Ví dụ cài đặt (chạy trên server/backend env): <code className="bg-slate-100 px-2 py-0.5 rounded">pip install psutil</code></div>
             </div>
           ) : null}
 
