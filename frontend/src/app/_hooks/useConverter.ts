@@ -156,6 +156,43 @@ export function useConverter({
     }, 200);
   }, []);
 
+  // References for active request + background job
+  const xhrRef = useRef<XMLHttpRequest | null>(null);
+  const jobIdRef = useRef<number | null>(null);
+  const pollTimerRef = useRef<number | null>(null);
+
+  const cancelConversion = useCallback(async () => {
+    // If an XHR upload is in progress, abort it.
+    if (xhrRef.current) {
+      try {
+        xhrRef.current.abort();
+      } catch {
+        /* ignore */
+      }
+      xhrRef.current = null;
+      setStatus("idle");
+      setProgress(0);
+      setErrorMessage("Đã hủy chuyển đổi.");
+      // Ask server to cancel job if it was created
+      if (jobIdRef.current) {
+        try {
+          const token = getAccessToken();
+          await fetch(`${apiUrl.replace(/\/convert\/?$/, "")}/convert/cancel/${jobIdRef.current}`, {
+            method: "POST",
+            headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+          });
+        } catch {
+          /* ignore */
+        }
+      }
+      // stop polling
+      if (pollTimerRef.current) {
+        window.clearInterval(pollTimerRef.current);
+        pollTimerRef.current = null;
+      }
+    }
+  }, [apiUrl]);
+
   const handleConvert = useCallback(async (mode?: string) => {
     if (!file) return;
 
@@ -176,12 +213,13 @@ export function useConverter({
       if (mode) formData.append("mode", mode);
 
       const xhr = new XMLHttpRequest();
+      xhrRef.current = xhr;
+
       xhr.open("POST", apiUrl, true);
+      // We'll treat the response as blob for 200 case; for 202 we parse text
       xhr.responseType = "blob";
       if (token) {
         xhr.setRequestHeader("Authorization", `Bearer ${token}`);
-      } else {
-        // Anonymous conversion: proceed without Authorization header (Free plan by IP quota)
       }
 
       xhr.upload.onprogress = (event) => {
@@ -192,6 +230,8 @@ export function useConverter({
       };
 
       xhr.onload = function () {
+        xhrRef.current = null;
+        // If backend returns 200 (legacy immediate), handle as before
         if (this.status === 200) {
           setProgress(100);
           setStatus("success");
@@ -206,52 +246,89 @@ export function useConverter({
           const hasTextHeader = xhr.getResponseHeader("X-PDF-Has-Text");
           if (hasTextHeader === "1") setPdfHasText(true);
           else if (hasTextHeader === "0") setPdfHasText(false);
-        } else {
-          const statusCode = this.status;
-          const fallback = `Lỗi Server: ${statusCode} ${this.statusText}`.trim();
+          return;
+        }
 
-          // For plan/quota gating, let the UI show a modal instead of the error panel.
-          if (statusCode === 403 || statusCode === 429) {
-            setStatus("idle");
-            setErrorMessage("");
+        // If backend scheduled a job, it will return 202 with JSON {job_id}
+        if (this.status === 202) {
+          setStatus("converting");
+          // Read JSON from blob
+          (this.response as Blob).text().then((t) => {
+            try {
+              const data = JSON.parse(t) as { job_id?: number };
+              const jobId = data.job_id;
+              if (!jobId) {
+                setStatus("error");
+                setErrorMessage("Không nhận được job id từ server.");
+                return;
+              }
+              jobIdRef.current = jobId;
 
-            const resp = this.response as unknown;
-            if (resp instanceof Blob) {
-              resp
-                .text()
-                .then((t) => {
-                  try {
-                    const parsed = JSON.parse(t) as { detail?: string };
-                    setGateBlocked({ status: statusCode, detail: parsed?.detail || t || fallback });
-                  } catch {
-                    setGateBlocked({ status: statusCode, detail: t || fallback });
+              // Poll status endpoint periodically
+              const base = apiUrl.replace(/\/convert\/?$/, "");
+              pollTimerRef.current = window.setInterval(async () => {
+                try {
+                  const res = await fetch(`${base}/convert/status/${jobId}`);
+                  if (!res.ok) throw new Error(`Status ${res.status}`);
+                  const s = await res.json();
+                  if (s.status === "completed" && s.result_url) {
+                    // Fetch result file
+                    const r = await fetch(`${base}${s.result_url}`);
+                    if (!r.ok) {
+                      setStatus("error");
+                      setErrorMessage("Không thể tải xuống file kết quả.");
+                      if (pollTimerRef.current) {
+                        window.clearInterval(pollTimerRef.current);
+                        pollTimerRef.current = null;
+                      }
+                      return;
+                    }
+                    const b = await r.blob();
+                    const outName = file.name.replace(/\.[^/.]+$/, "") + config.outputExt;
+                    setResultBlob(b);
+                    setResultFileName(outName);
+                    setProgress(100);
+                    setStatus("success");
+                    if (pollTimerRef.current) {
+                      window.clearInterval(pollTimerRef.current);
+                      pollTimerRef.current = null;
+                    }
+                    return;
                   }
-                })
-                .catch(() => setGateBlocked({ status: statusCode, detail: fallback }));
-            } else {
-              setGateBlocked({ status: statusCode, detail: fallback });
-            }
-            return;
-          }
 
-          // Specific handling for service-unavailable (OCR missing)
-          if (statusCode === 503) {
-            setStatus("error");
-            const resp = this.response as unknown;
-            if (resp instanceof Blob) {
-              resp
-                .text()
-                .then((t) => {
-                  setErrorMessage(t || fallback);
-                })
-                .catch(() => setErrorMessage(fallback));
-            } else {
-              setErrorMessage(fallback);
-            }
-            return;
-          }
+                  if (s.status === "failed" || s.status === "cancelled") {
+                    setStatus("error");
+                    setErrorMessage(s.error || `Job ${s.status}`);
+                    if (pollTimerRef.current) {
+                      window.clearInterval(pollTimerRef.current);
+                      pollTimerRef.current = null;
+                    }
+                    return;
+                  }
 
-          setStatus("error");
+                  // Keep showing spinner; optionally increase progress slightly
+                  setProgress((p) => Math.min(95, Math.max(p, p + 2)));
+                } catch (e) {
+                  // ignore transient polling errors
+                }
+              }, 2000);
+            } catch (e) {
+              setStatus("error");
+              setErrorMessage("Không thể parse response job id.");
+            }
+          });
+
+          return;
+        }
+
+        // Other non-200 statuses handled below
+        const statusCode = this.status;
+        const fallback = `Lỗi Server: ${statusCode} ${this.statusText}`.trim();
+
+        // For plan/quota gating, let the UI show a modal instead of the error panel.
+        if (statusCode === 403 || statusCode === 429) {
+          setStatus("idle");
+          setErrorMessage("");
 
           const resp = this.response as unknown;
           if (resp instanceof Blob) {
@@ -260,24 +337,68 @@ export function useConverter({
               .then((t) => {
                 try {
                   const parsed = JSON.parse(t) as { detail?: string };
-                  if (parsed?.detail) setErrorMessage(`Lỗi Server: ${parsed.detail}`);
-                  else if (t) setErrorMessage(`Lỗi Server: ${t}`);
-                  else setErrorMessage(fallback);
+                  setGateBlocked({ status: statusCode, detail: parsed?.detail || t || fallback });
                 } catch {
-                  if (t) setErrorMessage(`Lỗi Server: ${t}`);
-                  else setErrorMessage(fallback);
+                  setGateBlocked({ status: statusCode, detail: t || fallback });
                 }
+              })
+              .catch(() => setGateBlocked({ status: statusCode, detail: fallback }));
+          } else {
+            setGateBlocked({ status: statusCode, detail: fallback });
+          }
+          return;
+        }
+
+        // Specific handling for service-unavailable (OCR missing)
+        if (statusCode === 503) {
+          setStatus("error");
+          const resp = this.response as unknown;
+          if (resp instanceof Blob) {
+            resp
+              .text()
+              .then((t) => {
+                setErrorMessage(t || fallback);
               })
               .catch(() => setErrorMessage(fallback));
           } else {
             setErrorMessage(fallback);
           }
+          return;
+        }
+
+        setStatus("error");
+
+        const resp = this.response as unknown;
+        if (resp instanceof Blob) {
+          resp
+            .text()
+            .then((t) => {
+              try {
+                const parsed = JSON.parse(t) as { detail?: string };
+                if (parsed?.detail) setErrorMessage(`Lỗi Server: ${parsed.detail}`);
+                else if (t) setErrorMessage(`Lỗi Server: ${t}`);
+                else setErrorMessage(fallback);
+              } catch {
+                if (t) setErrorMessage(`Lỗi Server: ${t}`);
+                else setErrorMessage(fallback);
+              }
+            })
+            .catch(() => setErrorMessage(fallback));
+        } else {
+          setErrorMessage(fallback);
         }
       };
 
       xhr.onerror = function () {
+        xhrRef.current = null;
         setStatus("error");
         setErrorMessage("Không thể kết nối đến server.");
+      };
+
+      xhr.onabort = function () {
+        xhrRef.current = null;
+        setStatus("idle");
+        setErrorMessage("Đã hủy chuyển đổi.");
       };
 
       xhr.send(formData);
@@ -313,5 +434,6 @@ export function useConverter({
     downloadResult,
     gateBlocked,
     clearGateBlocked: () => setGateBlocked(null),
+    cancelConversion,
   };
 }

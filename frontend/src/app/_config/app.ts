@@ -1,5 +1,5 @@
 export const IS_DEMO_MODE = (process.env.NEXT_PUBLIC_DEMO_MODE ?? "false") === "true";
-export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/convert";
+export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8003/convert";
 
 // Base URL for backend API (admin/auth/health). If not set, derive from API_URL by stripping `/convert`.
 export const BACKEND_URL =

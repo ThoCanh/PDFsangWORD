@@ -24,7 +24,7 @@ services:
       - ./backend/.env
     environment:
       # Kết nối DB Postgres (thay vì SQLite)
-      - DATABASE_URL=postgresql://postgres:password@db:5432/docuflow
+      - DATABASE_URL=postgresql+psycopg2://postgres:password@db:5432/docuflow
       # Đường dẫn LibreOffice trên Linux (Chỉ cần tên lệnh)
       - LIBREOFFICE_PATH=soffice
       # Cho phép Frontend gọi vào
@@ -43,7 +43,7 @@ services:
       - "3000:3000"
     environment:
       # API URL để Frontend gọi (Gọi từ trình duyệt người dùng nên dùng localhost)
-      - NEXT_PUBLIC_API_URL=http://localhost:8000
+      - NEXT_PUBLIC_API_URL=http://localhost:8003
     depends_on:
       - backend
     volumes:

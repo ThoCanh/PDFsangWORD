@@ -19,58 +19,76 @@ export default function RequireAuth({ allow, children }: Props) {
   const [ready, setReady] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
-  React.useEffect(() => {
-    let cancelled = false;
+  const checkAuth = React.useCallback(async () => {
+    setReady(false);
+    setError(null);
 
-    async function check() {
-      setReady(false);
-      setError(null);
+    const token = getAccessToken();
+    if (!token) {
+      router.replace("/login");
+      return;
+    }
 
-      const token = getAccessToken();
-      if (!token) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8000);
+
+    try {
+      const res = await fetch(`${BACKEND_URL}/auth/me`, {
+        headers: { Authorization: `Bearer ${token}` },
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeout);
+
+      if (!res.ok) {
+        clearAccessToken();
         router.replace("/login");
         return;
       }
 
-      try {
-        const res = await fetch(`${BACKEND_URL}/auth/me`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (!res.ok) {
-          clearAccessToken();
-          router.replace("/login");
-          return;
+      const me = (await res.json()) as { role: Role };
+      if (!allow.includes(me.role)) {
+        if (me.role === "admin") {
+          router.replace("/admin");
+        } else {
+          router.replace("/");
         }
-
-        const me = (await res.json()) as { role: Role };
-        if (!allow.includes(me.role)) {
-          if (me.role === "admin") {
-            router.replace("/admin");
-          } else {
-            router.replace("/");
-          }
-          return;
-        }
-
-        if (!cancelled) setReady(true);
-      } catch (e: unknown) {
-        if (!cancelled) {
-          setError(e instanceof Error ? e.message : "Auth check failed");
-          setReady(false);
-        }
+        return;
       }
-    }
 
-    check();
-    return () => {
-      cancelled = true;
-    };
-  }, [allow, router, pathname]);
+      setReady(true);
+    } catch (e: unknown) {
+      clearTimeout(timeout);
+      const msg = e instanceof Error ? e.message : "Auth check failed";
+      setError(msg.includes("abort") ? "Không thể kết nối đến server (timeout)." : msg);
+      setReady(false);
+    }
+  }, [allow, router]);
+
+  React.useEffect(() => {
+    checkAuth();
+  }, [checkAuth, pathname]);
 
   if (error) {
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6">
-        <div className="text-sm text-rose-600">{error}</div>
+        <div className="text-center">
+          <div className="text-sm text-rose-600 mb-4">{error}</div>
+          <div className="flex justify-center gap-3">
+            <button
+              onClick={() => checkAuth()}
+              className="px-4 py-2 bg-white border rounded text-sm font-medium hover:bg-slate-50"
+            >
+              Thử lại
+            </button>
+            <button
+              onClick={() => { clearAccessToken(); router.replace('/login'); }}
+              className="px-4 py-2 bg-rose-50 text-rose-600 border rounded text-sm font-medium hover:bg-rose-100"
+            >
+              Đăng nhập lại
+            </button>
+          </div>
+        </div>
       </div>
     );
   }

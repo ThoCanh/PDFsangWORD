@@ -4,8 +4,14 @@ import time
 from pathlib import Path
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Request, UploadFile, Response
+from fastapi.responses import FileResponse, JSONResponse
+from concurrent.futures import ThreadPoolExecutor
+from threading import Lock
+import shutil
+import os
+from ..db.session import SessionLocal
+from fastapi.concurrency import run_in_threadpool  # run heavy sync tasks without blocking the event loop
 from sqlalchemy import and_
 from sqlalchemy.orm import Session
 
@@ -19,6 +25,13 @@ from ...db.models import ConversionJob, Plan, User
 from ...utils.files import make_work_dir, remove_tree, safe_filename
 
 router = APIRouter()
+
+# In-process conversion executor and bookkeeping
+CONVERSION_EXECUTOR = ThreadPoolExecutor(max_workers=int(os.environ.get("CONVERSION_WORKERS", "2")))
+JOB_FUTURES: dict[int, "concurrent.futures.Future"] = {}
+JOB_FUTURES_LOCK = Lock()
+RESULT_DIR = Path(os.environ.get("CONVERT_RESULT_DIR", "/tmp/convert_results"))
+RESULT_DIR.mkdir(parents=True, exist_ok=True)
 
 
 @router.get("/convert/usage")
@@ -381,7 +394,66 @@ async def convert(
                 # User explicitly requested OCR-first local processing
                 force_ocr = True
 
-            result = convert_pdf_to_docx_pipeline(pdf_path=in_pdf, work_dir=work_dir, prefer_tier_a=prefer_tier_a, force_ocr=force_ocr)
+            # --- NEW: schedule conversion as an asynchronous job in the executor ---
+            def _run_job(job_id: int, in_pdf_path: str, work_dir_path: str, prefer_tier_a: bool, force_ocr: bool, user_id: int | None, client_ip: str | None):
+                # Each thread creates its own DB session
+                db = SessionLocal()
+                t0_inner = time.perf_counter()
+                try:
+                    # Re-fetch job inside thread/session
+                    job_inner = db.get(ConversionJob, job_id)
+
+                    # Use the pipeline (sync) inside the worker thread
+                    result = convert_pdf_to_docx_pipeline(
+                        pdf_path=Path(in_pdf_path),
+                        work_dir=Path(work_dir_path),
+                        prefer_tier_a=prefer_tier_a,
+                        force_ocr=force_ocr,
+                    )
+
+                    # Move docx to a shared results folder
+                    dest = RESULT_DIR / f"{job_id}.docx"
+                    shutil.copy(result.docx_path, dest)
+
+                    job_inner.mode = result.mode
+                    job_inner.has_text_layer = 1 if result.has_text_layer else 0
+                    job_inner.finished_at = datetime.now(timezone.utc)
+                    job_inner.duration_ms = int((time.perf_counter() - t0_inner) * 1000)
+                    job_inner.status = "completed"
+                    db.add(job_inner)
+                    db.commit()
+                except Exception as e:
+                    try:
+                        job_inner = db.get(ConversionJob, job_id)
+                        job_inner.status = "failed"
+                        job_inner.error = str(e)
+                        job_inner.finished_at = datetime.now(timezone.utc)
+                        job_inner.duration_ms = int((time.perf_counter() - t0_inner) * 1000)
+                        db.add(job_inner)
+                        db.commit()
+                    except Exception:
+                        db.rollback()
+                finally:
+                    db.close()
+
+            # Submit the job and return 202 with job id
+            from concurrent.futures import Future
+
+            future = CONVERSION_EXECUTOR.submit(
+                _run_job,
+                job.id,
+                str(in_pdf),
+                str(work_dir),
+                prefer_tier_a,
+                force_ocr,
+                (current_user.id if current_user else None),
+                getattr(getattr(request, 'client', None), 'host', None),
+            )
+            with JOB_FUTURES_LOCK:
+                JOB_FUTURES[job.id] = future
+
+            # Return 202 with job id and status endpoint
+            return JSONResponse(status_code=202, content={"job_id": job.id}, headers={"Location": f"/convert/status/{job.id}"})
         except HTTPException as e:
             try:
                 job.status = "failed"
@@ -430,20 +502,22 @@ async def convert(
             db.commit()
         except Exception:
             db.rollback()
-
+        # Previously returned the file directly. Now we schedule background work and return 202 job id above.
+        # This code-path is intentionally unreachable if scheduling worked above, but left here for backward compatibility.
         out_name = safe_filename(Path(filename).stem, fallback="document") + ".docx"
-
         return FileResponse(
-            path=str(result.docx_path),
+            path=str(Path(RESULT_DIR) / f"{job.id}.docx"),
             media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             filename=out_name,
             headers={
-                "X-Conversion-Mode": result.mode,
-                "X-PDF-Has-Text": "1" if result.has_text_layer else "0",
+                "X-Conversion-Mode": job.mode or "",
+                "X-PDF-Has-Text": "1" if job.has_text_layer else "0",
             },
         )
 
     if type == "jpg-png":
+        # No changes for jpg-png
+        pass
         filename = file.filename
         lower = filename.lower()
         if not (lower.endswith(".jpg") or lower.endswith(".jpeg")):
@@ -651,3 +725,61 @@ async def convert(
         )
 
     raise HTTPException(status_code=400, detail=f"Unsupported type: {type}")
+
+
+@router.get("/convert/status/{job_id}")
+def get_convert_status(job_id: int, db: Session = Depends(get_db)):
+    job = db.get(ConversionJob, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    result_url = None
+    result_path = RESULT_DIR / f"{job.id}.docx"
+    if result_path.exists() and job.status == "completed":
+        result_url = f"/convert/result/{job.id}"
+
+    return {
+        "id": job.id,
+        "status": job.status,
+        "mode": job.mode,
+        "has_text_layer": bool(job.has_text_layer),
+        "error": job.error,
+        "created_at": job.created_at.isoformat() if job.created_at else None,
+        "finished_at": job.finished_at.isoformat() if job.finished_at else None,
+        "result_url": result_url,
+    }
+
+
+@router.get("/convert/result/{job_id}")
+def get_convert_result(job_id: int, db: Session = Depends(get_db)):
+    job = db.get(ConversionJob, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    result_path = RESULT_DIR / f"{job.id}.docx"
+    if not result_path.exists() or job.status != "completed":
+        raise HTTPException(status_code=404, detail="Result not ready")
+
+    out_name = safe_filename(Path(job.filename or "document").stem, fallback="document") + ".docx"
+    return FileResponse(
+        path=str(result_path),
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        filename=out_name,
+    )
+
+
+@router.post("/convert/cancel/{job_id}")
+def cancel_convert_job(job_id: int, db: Session = Depends(get_db)):
+    job = db.get(ConversionJob, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    with JOB_FUTURES_LOCK:
+        f = JOB_FUTURES.get(job_id)
+        if f:
+            cancelled = f.cancel()
+            if cancelled:
+                job.status = "cancelled"
+                db.add(job)
+                db.commit()
+                return {"cancelled": True}
+            else:
+                return {"cancelled": False, "detail": "Could not cancel (already running)"}
+    return {"cancelled": False, "detail": "No running job"}

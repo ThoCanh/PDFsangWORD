@@ -471,7 +471,7 @@ export default function HomeConverter({ activeTool, onSelectTool }: Props) {
                             className="px-3 py-1 bg-slate-100 text-slate-700 rounded border hover:bg-slate-200 transition"
                             type="button"
                           >
-                            Chọn chế độ: <span className="ml-2 font-medium">{conversionMode === "tier-a" ? "Chế độ chuyển đổi: tier-a" : conversionMode === "ocr" ? "Chế độ chuyển PDF(SCAN) sang Word văn bản" : "Chế độ chuyển đổi: tier-a"}</span>
+                            Chọn chế độ: <span className="ml-2 font-medium">{conversionMode === "tier-a" ? "AUTO" : conversionMode === "ocr" ? "Chế độ chuyển PDF(SCAN) sang Word văn bản" : "Chế độ chuyển đổi: tier-a"}</span>
                           </button>
                         </div>
                       )}
@@ -525,7 +525,16 @@ export default function HomeConverter({ activeTool, onSelectTool }: Props) {
                 <h3 className="text-xl font-semibold text-slate-800 mb-2">
                   Đang xử lý...
                 </h3>
-                <p className="text-slate-500 max-w-xs mx-auto">Vui lòng đợi.</p>
+                <p className="text-slate-500 max-w-xs mx-auto">Vui lòng đợi. Nếu quá lâu, bạn có thể hủy và thử lại.</p>
+                <div className="mt-4 flex justify-center gap-3">
+                  <button
+                    onClick={() => converter.cancelConversion()}
+                    className="px-4 py-2 bg-rose-100 text-rose-600 rounded-lg font-medium hover:bg-rose-200 transition"
+                    type="button"
+                  >
+                    Hủy
+                  </button>
+                </div>
               </div>
             )}
 
